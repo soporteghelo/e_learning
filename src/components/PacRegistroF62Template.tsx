@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { AppDynamicConfig } from '../types';
 import { F62_ROWS_PER_PAGE, type F62Editable, type F62Tipo, type PacF62Row } from '../lib/f62';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 interface PacRegistroF62TemplateProps {
   rows: PacF62Row[];
@@ -34,7 +35,7 @@ const PacRegistroF62Template = React.forwardRef<HTMLDivElement, PacRegistroF62Te
     const cleanUrl = url.replace(/^https?:\/\//, '');
     return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
   };
-  const logo = useMemo(() => proxyUrl(appConfig?.logoCertificado), [appConfig?.logoCertificado]);
+  const logo = GENERIC_LOGO_SRC;
   const firmaResponsable = useMemo(() => proxyUrl(appConfig?.firmaRepresentante), [appConfig?.firmaRepresentante]);
 
   const empleador = {
@@ -68,7 +69,7 @@ const PacRegistroF62Template = React.forwardRef<HTMLDivElement, PacRegistroF62Te
             <tbody>
               <tr style={{ height: '6.5mm' }}>
                 <td style={td({ textAlign: 'center', padding: '1mm' })} rowSpan={3}>
-                  {logo ? <img src={logo} alt="logo" style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: '17mm' }} /> : <b>AESA</b>}
+                  <img src={logo} alt="logo" style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: '17mm' }} />
                 </td>
                 <td style={td({ textAlign: 'center', fontWeight: 700, fontSize: '11pt', padding: '1mm 4mm' })} rowSpan={3}>
                   REGISTRO DE INDUCCIÓN, CAPACITACIÓN, ENTRENAMIENTO Y SIMULACROS DE EMERGENCIA

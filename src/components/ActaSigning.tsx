@@ -36,7 +36,6 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const [hasDrawn, setHasDrawn] = useState(false);
   const [signatureAsistenciaData, setSignatureAsistenciaData] = useState<string | null>(null);
   const [hasDrawnAsistencia, setHasDrawnAsistencia] = useState(false);
-  const [logoSrc, setLogoSrc] = useState('');
   const [firmaRepSrc, setFirmaRepSrc] = useState('');
   const [correo, setCorreo] = useState(userSession.correo || '');
   const [geo, setGeo] = useState('');
@@ -120,10 +119,9 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
     }
   }, [step]);
 
-  // Load branding logo + firma del representante como base64 para html2canvas
+  // Firma del representante como base64 para html2canvas (el logo es genérico y local)
   useEffect(() => {
     if (!appConfig) return;
-    fetchDriveImageAsBase64(appConfig.logoCertificado).then(setLogoSrc);
     if (appConfig.firmaRepresentante) fetchDriveImageAsBase64(appConfig.firmaRepresentante).then(setFirmaRepSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appConfig]);
@@ -557,7 +555,6 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
           timestamp={timestamp || new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })}
           dispositivo={dispositivo}
           appConfig={appConfig}
-          logoSrc={logoSrc}
           representanteFirmaSrc={firmaRepSrc}
           numero={actaNumero}
           folio={folio}

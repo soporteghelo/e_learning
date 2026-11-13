@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { AppDynamicConfig, PacPrograma } from '../types';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 export interface PacAsistenciaRow {
   dni: string;
@@ -31,14 +32,9 @@ const TOTAL_ROWS = 24;
 
 /** "Acta de Asistentes" del PAC: roster de un programa con nota, resultado, firma y foto de cada intento. */
 const PacAsistenciaTemplate = React.forwardRef<HTMLDivElement, PacAsistenciaTemplateProps>((props, ref) => {
-  const { programa, rows, appConfig } = props;
+  const { programa, rows } = props;
 
-  const proxyUrl = (url?: string) => {
-    if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
-    const cleanUrl = url.replace(/^https?:\/\//, '');
-    return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
-  };
-  const logo = useMemo(() => proxyUrl(appConfig?.logoCertificado), [appConfig?.logoCertificado]);
+  const logo = GENERIC_LOGO_SRC;
 
   const cellStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '3px 5px', fontSize: '8.5px', verticalAlign: 'middle' };
   const labelStyle: React.CSSProperties = { ...cellStyle, fontWeight: 700, background: '#f3f4f6' };

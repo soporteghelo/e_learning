@@ -42,7 +42,6 @@ export default function CertificateClaim({
   // Data states
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
-  const [certificateLogoSrc, setCertificateLogoSrc] = useState('');
   const [certificateSignatureSrc, setCertificateSignatureSrc] = useState('');
   const [nombre, setNombre] = useState(`${userSession.nombres} ${userSession.apellidos}`.trim());
   const [cargo, setCargo] = useState(userSession.cargo || '');
@@ -112,7 +111,6 @@ export default function CertificateClaim({
   // Load branding assets as base64 so html2canvas can render them without CORS issues
   useEffect(() => {
     if (!appConfig) return;
-    fetchDriveImageAsBase64(appConfig.logoCertificado).then(setCertificateLogoSrc);
     fetchDriveImageAsBase64(appConfig.firmaRepresentante).then(setCertificateSignatureSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appConfig]);
@@ -597,7 +595,6 @@ export default function CertificateClaim({
           quizQuestions={topic ? quizQuestions.filter(q => q.idMain === topic.id) : quizQuestions}
           topic={topic}
           fullNameOverride={nombre}
-          certificateLogoSrc={certificateLogoSrc}
           certificateSignatureSrc={certificateSignatureSrc}
         />
       </div>

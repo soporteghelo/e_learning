@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
+import { useState, useRef, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, PenTool, CheckCircle, Download, Check,
@@ -12,7 +12,6 @@ import type { UserSession, AppDynamicConfig } from '../types';
 import ConsentTemplate from './ConsentTemplate';
 import { CONSENT_TITULO, CONSENT_PARRAFOS, CONSENT_CHECKBOX_LABEL } from '../lib/consentText';
 import { useFaceCapture } from '../hooks/useFaceCapture';
-import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 
 interface ConsentSigningProps {
   userSession: UserSession;
@@ -33,7 +32,6 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
 
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
-  const [logoSrc, setLogoSrc] = useState('');
   const [savedUrls, setSavedUrls] = useState<{ firmaUrl?: string; selfieUrl?: string }>({});
 
   const {
@@ -65,11 +63,6 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
       canvas.height = sigContainerRef.current.offsetHeight;
     }
   }, [step]);
-
-  useEffect(() => {
-    if (!appConfig) return;
-    fetchDriveImageAsBase64(appConfig.logoCertificado).then(setLogoSrc);
-  }, [appConfig]);
 
   const clearSignature = () => { sigCanvas.current?.clear(); setSignatureData(null); setHasDrawn(false); };
   // getTrimmedCanvas() is broken under Vite dev (react-signature-canvas@1.1.0-alpha.2's
@@ -127,6 +120,7 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
         contacto1Parentesco: userSession.contacto1Parentesco,
         contacto2Numero: userSession.contacto2Numero,
         contacto2Parentesco: userSession.contacto2Parentesco,
+        publico: userSession.audience.length > 0 ? userSession.audience.join(', ') : undefined,
         pdfBase64,
         signatureBase64: signatureData || undefined,
         selfieBase64: selfieData || undefined,
@@ -402,7 +396,6 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
           timestamp={timestamp || new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })}
           dispositivo={dispositivo}
           appConfig={appConfig}
-          logoSrc={logoSrc}
           folio={folio}
         />
       </div>

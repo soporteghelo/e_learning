@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import { SHEETS_CONFIG, MOCK_DATA_CONFIG, getSheetUrl, APPS_SCRIPT_CONFIG, APP_CONFIG, ADMIN_CONFIG } from '../config/app.config';
-import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AppDynamicConfig, QuizSavedProgress } from '../types';
+import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AppDynamicConfig, QuizSavedProgress, CertificateRecord, CursoEncuesta, SatisfaccionRating } from '../types';
 import { enqueueWrite, flushQueue } from '../lib/offlineQueue';
 
 /** Reintenta las escrituras encoladas offline (progreso/eval) usando el proxy de Apps Script. */
@@ -260,7 +260,7 @@ export async function fetchDataChunks(force = false): Promise<DataChunk[]> {
               idMain: (row.IdMain || '').trim(),
               tema: row.Tema || '',
               contenido: row.Contenido || '',
-              videos: [row.Video_1, row.Video_2, row.Video_3].filter((v: string) => v && v.trim()),
+              videos: [row.Video_1, row.Video_2, row.Video_3, row.Video_4, row.Video_5, row.Video_6].filter((v: string) => v && v.trim()),
               comentarioVideo: row.ComentarioVideo || '',
               pdf: row.PDF || '',
               contexto: row.Contexto || '',
@@ -470,6 +470,9 @@ export async function saveContentToSheets(
         Video_1: c.videos?.[0] || '',
         Video_2: c.videos?.[1] || '',
         Video_3: c.videos?.[2] || '',
+        Video_4: c.videos?.[3] || '',
+        Video_5: c.videos?.[4] || '',
+        Video_6: c.videos?.[5] || '',
         ComentarioVideo: c.comentarioVideo || '',
         PDF: c.pdf || '',
         Contexto: c.contexto,
@@ -681,7 +684,7 @@ function getMockChunks(): DataChunk[] {
     idMain: c.idMain,
     tema: c.tema,
     contenido: c.contenido,
-    videos: [c.video_1, c.video_2, c.video_3].filter((v: string) => v && v.trim()),
+    videos: [c.video_1, c.video_2, c.video_3, c.video_4, c.video_5, c.video_6].filter((v: string) => v && v.trim()),
     comentarioVideo: c.comentarioVideo || '',
     pdf: c.pdf || '',
     contexto: c.contexto,
@@ -896,6 +899,58 @@ export async function fetchAllCertificates(): Promise<Record<string, Record<stri
     });
   } catch {
     return {};
+  }
+}
+
+/**
+ * Fetch ALL certificate records with full detail (firma, selfie, nota, etc.).
+ * Las cabeceras reales de la hoja CERTIFICADOS van en MAYÚSCULAS (APELLIDOS,
+ * NOMBRES, FIRMA, FOTO…); se aceptan variantes por si la hoja fue editada a mano.
+ */
+export async function fetchAllCertificateRecords(): Promise<CertificateRecord[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.certificates);
+  const pick = (row: any, ...keys: string[]): string => {
+    for (const k of keys) {
+      const v = row[k];
+      if (v !== undefined && String(v).trim()) return String(v).trim();
+    }
+    return '';
+  };
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const records: CertificateRecord[] = [];
+          for (const row of results.data as any[]) {
+            const dni = pick(row, 'DNI', 'Dni');
+            const topicId = pick(row, 'TopicId', 'topicId', 'TOPICID');
+            if (!dni || !topicId) continue;
+            records.push({
+              dni,
+              apellidos: pick(row, 'APELLIDOS', 'Apellidos'),
+              nombres: pick(row, 'NOMBRES', 'Nombres'),
+              topicId,
+              courseTitle: pick(row, 'TITULO_CERTIFICADO', 'CourseTitle', 'Curso'),
+              nota: pick(row, 'NOTA', 'Nota'),
+              pdfUrl: pick(row, 'LinkCertificado', 'PDF_URL'),
+              firmaUrl: pick(row, 'FIRMA', 'FirmaUrl', 'FIRMA_URL'),
+              selfieUrl: pick(row, 'FOTO', 'SelfieUrl', 'SELFIE_URL'),
+              cargo: pick(row, 'CARGO', 'Cargo'),
+              celular: pick(row, 'CELULAR', 'Celular'),
+              fecha: pick(row, 'Fecha', 'FECHA'),
+            });
+          }
+          resolve(records);
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -1431,6 +1486,79 @@ export async function saveShortEvalResult(data: {
 }
 
 // =============================================
+// ENCUESTAS DE SATISFACCIÓN (al terminar el quiz de un curso)
+// =============================================
+
+/** Preguntas de la encuesta; el orden define el de `respuestas`. */
+export const SATISFACCION_PREGUNTAS = [
+  '¿Se cumplió el objetivo del curso?',
+  '¿El contenido es aplicable a tu puesto de trabajo?',
+  '¿El material (videos y lecturas) fue claro?',
+  '¿Cómo calificas el curso en general?',
+] as const;
+
+export async function saveCursoEncuesta(data: {
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  topicId: string;
+  courseTitle: string;
+  nota: number;
+  respuestas: SatisfaccionRating[];
+  comentario: string;
+}): Promise<void> {
+  const payload = { action: 'saveCursoEncuesta', ...data };
+  try {
+    await postToAppsScript(payload);
+  } catch (error) {
+    // Sin conexión: encolar (el backend es anti-duplicado por curso+DNI)
+    console.warn('Encuesta encolada offline:', error);
+    enqueueWrite(payload);
+  }
+}
+
+/** Todas las respuestas de encuestas (hoja ENCUESTAS), para el panel admin. */
+export async function fetchAllEncuestas(): Promise<CursoEncuesta[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.encuestas);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const rows: CursoEncuesta[] = [];
+          for (const row of results.data as any[]) {
+            const dni = String(row.DNI || '').trim();
+            const topicId = String(row.TopicId || '').trim();
+            if (!dni || !topicId) continue;
+            const respuestas = SATISFACCION_PREGUNTAS
+              .map((_, i) => String(row[`R${i + 1}`] || '').trim())
+              .filter(Boolean) as SatisfaccionRating[];
+            rows.push({
+              dni,
+              apellidos: String(row.Apellidos || '').trim(),
+              nombres: String(row.Nombres || '').trim(),
+              topicId,
+              courseTitle: String(row.CourseTitle || '').trim(),
+              nota: parseFloat(String(row.Nota || '0')) || 0,
+              respuestas,
+              comentario: String(row.Comentario || '').trim(),
+              fecha: String(row.Fecha || '').trim(),
+            });
+          }
+          resolve(rows);
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch {
+    return [];
+  }
+}
+
+// =============================================
 // PAC - PROGRAMA ANUAL DE CAPACITACIONES
 // =============================================
 import type { PacPrograma, PacPregunta, PacResultado, PacEncuesta, PacWrongAnswer, PersonalActivo } from '../types';
@@ -1886,6 +2014,8 @@ export async function saveOnboardingConsent(data: {
   contacto1Parentesco?: string;
   contacto2Numero?: string;
   contacto2Parentesco?: string;
+  /** Audiencia ya elegida en este dispositivo, para no dejar INGRESOS.Publico vacío. */
+  publico?: string;
   pdfBase64: string;
   signatureBase64?: string;
   selfieBase64?: string;

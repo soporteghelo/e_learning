@@ -9,7 +9,8 @@ import { shuffleArray } from '../lib/utils';
 import { fetchQuizProgressFromSheets, saveQuizProgressToSheets } from '../services/sheetsService';
 import { useDistractionMonitor } from '../hooks/useDistractionMonitor';
 import QuizOptions from './QuizOptions';
-import type { QuizQuestion, LearnTopic, QuizSavedProgress, Confidence, QuizWrongAnswer } from '../types';
+import SatisfaccionEncuesta, { yaRespondioEncuesta } from './SatisfaccionEncuesta';
+import type { QuizQuestion, LearnTopic, QuizSavedProgress, Confidence, QuizWrongAnswer, UserSession } from '../types';
 
 const MAX_DISTRACTIONS = 5;
 
@@ -21,7 +22,7 @@ interface QuizModeProps {
   questions: QuizQuestion[];
   onBack: (partialScore?: number, wrongAnswers?: QuizWrongAnswer[]) => void;
   onComplete: (score: number, wrongAnswers: QuizWrongAnswer[]) => void;
-  userDni?: string;
+  userSession?: UserSession;
 }
 
 type AnsweredMap = Record<number, { selected: string; correct: boolean; confidence?: Confidence }>;
@@ -56,8 +57,9 @@ export default function QuizMode({
   questions,
   onBack,
   onComplete,
-  userDni,
+  userSession,
 }: QuizModeProps) {
+  const userDni = userSession?.dni;
   const storageKey = `ldc_quiz_progress_${topic.id}_${userDni || 'anon'}`;
 
   // Initialize state from localStorage (resume) or fresh shuffle
@@ -116,6 +118,7 @@ export default function QuizMode({
   );
   const [showFeedback, setShowFeedback] = useState(!!resumedLast);
   const [isFinished, setIsFinished] = useState(false);
+  const [showEncuesta, setShowEncuesta] = useState(false);
   const [isLoadingSheets, setIsLoadingSheets] = useState(!!userDni && !initState.isResumed);
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME);
 
@@ -319,10 +322,26 @@ export default function QuizMode({
     );
   }
 
+  // ── ENCUESTA DE SATISFACCIÓN (al cerrar el quiz, una sola vez por curso) ──
+  if (showEncuesta) {
+    return (
+      <SatisfaccionEncuesta
+        topic={topic}
+        nota={parseFloat(((score / totalQuestions) * 20).toFixed(1))}
+        userSession={userSession}
+        onDone={() => onBack()}
+      />
+    );
+  }
+
   // ── RESULTS SCREEN ──
   if (isFinished) {
     const scoreOutOf20 = parseFloat(((score / totalQuestions) * 20).toFixed(1));
     const passed = scoreOutOf20 >= 16;
+    const finalizar = () => {
+      if (yaRespondioEncuesta(topic.id, userDni)) onBack();
+      else setShowEncuesta(true);
+    };
 
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 safe-area-top safe-area-bottom">
@@ -351,7 +370,7 @@ export default function QuizMode({
             </div>
           </div>
           <div className="space-y-3">
-            <button onClick={() => onBack()} className="w-full btn-primary py-4 text-lg shadow-xl">
+            <button onClick={finalizar} className="w-full btn-primary py-4 text-lg shadow-xl">
               Finalizar y Continuar
             </button>
             <button onClick={resetQuiz} className="w-full btn-secondary py-4 text-lg flex items-center justify-center gap-2">

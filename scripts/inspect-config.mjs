@@ -1,7 +1,7 @@
-const sheetId = '1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA';
+const sheetId = '1tngSSrn_0xXHJacyExpfH91b6MXsJOn8MlB0Okw-8tU';
 
 async function fetchSheet(sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${sheetName}`;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=1&sheet=${sheetName}`;
   const response = await fetch(url);
 
   if (!response.ok) {

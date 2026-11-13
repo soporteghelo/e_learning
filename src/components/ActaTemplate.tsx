@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import type { AppDynamicConfig } from '../types';
 import { interpolateActa, type ActaSignerData } from '../lib/actaInterpolate';
 import { ACTA_DECLARACION, type GeneralActaDoc } from '../lib/actaAssignment';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 // Vite raw import de la plantilla HTML (mismo patrón que el certificado)
 // @ts-ignore
@@ -19,7 +20,6 @@ interface ActaTemplateProps {
   timestamp: string;      // fecha/hora Lima legible
   dispositivo: string;
   appConfig: AppDynamicConfig | null;
-  logoSrc?: string;
   /** Firma del representante (quien ENTREGA), ya como data URL base64. */
   representanteFirmaSrc?: string;
   /** N° del acta (opcional; si no se pasa se imprime una línea en blanco). */
@@ -81,7 +81,7 @@ function blank(val: string | undefined, minWidth = '45px'): string {
 }
 
 const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props, ref) => {
-  const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero, folio, geo, correo } = props;
+  const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, representanteFirmaSrc, numero, folio, geo, correo } = props;
 
   const proxyUrl = (url?: string) => {
     if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
@@ -96,7 +96,7 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
     const mes = MESES[now.getMonth()];
     const currentDate = now.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const nombreCompleto = `${signer.apellidos || ''} ${signer.nombres || ''}`.trim().toUpperCase();
-    const logo = proxyUrl(logoSrc || appConfig?.logoCertificado) || 'https://via.placeholder.com/150x40?text=LOGO';
+    const logo = GENERIC_LOGO_SRC;
 
     // Párrafo de introducción con datos fijos (config) y fecha actual
     const introHtml =
@@ -148,7 +148,7 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       device_info: dispositivo ? `Dispositivo: ${escapeHtml(simplifyDevice(dispositivo))}` : 'Registro almacenado en el sistema de gestión SST',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero, folio, geo, correo]);
+  }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, representanteFirmaSrc, numero, folio, geo, correo]);
 
   return (
     <div

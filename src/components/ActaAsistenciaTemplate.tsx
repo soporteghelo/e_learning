@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { ActaDocumento, ActaItem, AppDynamicConfig } from '../types';
 import type { FirmaRosterRow } from '../lib/firmaRoster';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 export interface AsistenciaRow extends FirmaRosterRow {
   fotoBase64?: string;
@@ -13,6 +14,8 @@ interface ActaAsistenciaTemplateProps {
   item: ActaItem;
   rows: AsistenciaRow[];
   appConfig: AppDynamicConfig | null;
+  /** Fecha de la capacitación en DD/MM/YYYY; si no se pasa, se usa la de hoy. */
+  fecha?: string;
 }
 
 /** Escapa texto plano para incrustarlo con seguridad en celdas HTML. */
@@ -46,11 +49,12 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
     return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
   };
 
-  const logo = useMemo(() => proxyUrl(appConfig?.logoCertificado), [appConfig?.logoCertificado]);
+  const logo = GENERIC_LOGO_SRC;
   const firmaResponsable = useMemo(() => proxyUrl(appConfig?.firmaRepresentante), [appConfig?.firmaRepresentante]);
 
   const now = new Date();
-  const fecha = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  const fecha = props.fecha?.trim()
+    || `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
 
   const cellStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '4px 8px', fontSize: '9.5px', verticalAlign: 'middle' };
   const labelStyle: React.CSSProperties = { ...cellStyle, fontWeight: 700, background: '#f3f4f6' };
@@ -176,7 +180,7 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
           {rows.length === 0 ? (
             <tr><td style={{ ...attRowStyle, fontStyle: 'italic', color: '#6b7280' }} colSpan={9}>Sin asistentes registrados todavía</td></tr>
           ) : rows.map((r, i) => (
-            <tr key={r.dni}>
+            <tr key={`${r.dni}-${i}`}>
               <td style={attRowStyle}>{i + 1}</td>
               <td style={{ ...attRowStyle, overflowWrap: 'break-word' }}>{esc(r.nombre)}</td>
               <td style={attRowStyle}>{esc(r.dni)}</td>

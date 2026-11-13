@@ -17,11 +17,12 @@ interface CertificateTemplateProps {
   timestamp: string;
   progress: UserProgress[];
   quizQuestions: QuizQuestion[];
-  certificateLogoSrc: string;
   certificateSignatureSrc: string;
   topic?: LearnTopic;
   fullNameOverride?: string;
 }
+
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 const CertificateTemplate = React.forwardRef<HTMLDivElement, CertificateTemplateProps>((props, ref) => {
   const {
@@ -34,7 +35,6 @@ const CertificateTemplate = React.forwardRef<HTMLDivElement, CertificateTemplate
     timestamp,
     progress,
     quizQuestions,
-    certificateLogoSrc,
     certificateSignatureSrc,
     topic,
     fullNameOverride,
@@ -56,7 +56,7 @@ const CertificateTemplate = React.forwardRef<HTMLDivElement, CertificateTemplate
     const EMPTY_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
     let certPage = certificateBaseHtml
-      .replace(/{{certificate_logo_src}}/gi, proxyUrl(certificateLogoSrc) || 'https://via.placeholder.com/340x95?text=LOGO+EMPRESA')
+      .replace(/{{certificate_logo_src}}/gi, GENERIC_LOGO_SRC)
       .replace(/{{user_full_name}}/gi, fullName)
       .replace(/{{user_cargo}}/gi, cargo || 'PERSONAL OPERATIVO')
       .replace(/{{user_celular}}/gi, celular || '-')
@@ -127,7 +127,7 @@ const CertificateTemplate = React.forwardRef<HTMLDivElement, CertificateTemplate
   }, [
     userSession, appConfig, cargo, celular, signatureData, 
     selfieData, timestamp, progress, quizQuestions, 
-    certificateLogoSrc, certificateSignatureSrc
+    certificateSignatureSrc
   ]);
 
   return (

@@ -8,6 +8,7 @@ import {
   registerIngreso,
   updateIngresoProgress,
   fetchIngresoByDni,
+  updateUserProfile,
   fetchCertificateLinkByDni,
   fetchAppDynamicConfig,
   fetchGlobalKnownUsers,
@@ -45,6 +46,7 @@ import GuidedTour from './components/GuidedTour';
 import type { TourStage } from './components/GuidedTour';
 import CourseDetail from './components/CourseDetail';
 import DriveVideoPlayer from './components/DriveVideoPlayer';
+import { youtubeEmbedUrl, youtubeWatchUrl } from './lib/youtube';
 import InstallAppButton from './components/InstallAppButton';
 
 // Lazy loaded components for code splitting
@@ -106,6 +108,28 @@ function slimProgress(prog: UserProgress[]): UserProgress[] {
   return prog.map(({ topicId, completed, currentChunk, quizScore, lastAccessed, wrongAnswers }) => ({
     topicId, completed, currentChunk, quizScore, lastAccessed, wrongAnswers,
   }));
+}
+
+/**
+ * Si este dispositivo conoce la audiencia del trabajador pero la hoja no
+ * (INGRESOS.Publico vacío), la sube. Sin esto, iniciar sesión en otro
+ * dispositivo vuelve a pedirle sus datos, porque el login reconstruye la sesión
+ * solo con lo que hay en la hoja. Se comprueba una vez por dispositivo y DNI.
+ */
+function repararAudienciaEnHoja(session: UserSession): void {
+  if (!session.dni || session.audience.length === 0) return;
+  const flag = `learndrive_publico_sync_${session.dni}`;
+  if (localStorage.getItem(flag) === 'true') return;
+  fetchIngresoByDni(session.dni)
+    .then(async record => {
+      if (!record) return;
+      if (!String(record.publico || '').trim()) {
+        const r = await updateUserProfile({ dni: session.dni, publico: session.audience.join(', ') });
+        if (!r.success) return;
+      }
+      localStorage.setItem(flag, 'true');
+    })
+    .catch(console.error);
 }
 
 /** Clave localStorage de progreso persistente por DNI (sobrevive logout) */
@@ -231,6 +255,7 @@ export default function App() {
           } else if (migratedAudience.length > 0) {
             setAudience(migratedAudience);
             setView('dashboard');
+            repararAudienciaEnHoja(session);
           } else {
             setView('onboarding');
           }
@@ -639,6 +664,7 @@ export default function App() {
     if (updatedSession.audience.length > 0) {
       setAudience(updatedSession.audience);
       setView('dashboard');
+      repararAudienciaEnHoja(updatedSession);
     } else {
       setView('onboarding');
     }
@@ -1100,7 +1126,7 @@ export default function App() {
                   setView('courseDetail');
                 }}
                 onComplete={(score, wrongAnswers) => handleQuizComplete(selectedTopic.id, score, wrongAnswers)}
-                userDni={userSession?.dni}
+                userSession={userSession ?? undefined}
               />
             </Suspense>
           </motion.div>
@@ -1132,17 +1158,24 @@ export default function App() {
       {/* Media Overlay — Dramatic 'Lights Out' Effect */}
       <AnimatePresence>
         {mediaOverlay && (() => {
-          const embedUrl = driveEmbedUrl(mediaOverlay.url);
+          // YouTube se resuelve antes que Drive: sus enlaces no deben pasar por el
+          // extractor de IDs de Drive ni por /api/drive-video.
+          const ytEmbedUrl = mediaOverlay.type === 'video' ? youtubeEmbedUrl(mediaOverlay.url) : '';
+          const embedUrl = ytEmbedUrl ? '' : driveEmbedUrl(mediaOverlay.url);
           // Build a direct Drive view URL from the original link (always opens correctly)
           const rawUrl = mediaOverlay.url.trim();
           let driveFileId = '';
-          for (const p of [/\/file\/d\/([a-zA-Z0-9_-]+)/, /id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/]) {
-            const m = rawUrl.match(p); if (m) { driveFileId = m[1]; break; }
+          if (!ytEmbedUrl) {
+            for (const p of [/\/file\/d\/([a-zA-Z0-9_-]+)/, /id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/]) {
+              const m = rawUrl.match(p); if (m) { driveFileId = m[1]; break; }
+            }
+            if (!driveFileId && /^[a-zA-Z0-9_-]{25,}$/.test(rawUrl)) driveFileId = rawUrl;
           }
-          if (!driveFileId && /^[a-zA-Z0-9_-]{25,}$/.test(rawUrl)) driveFileId = rawUrl;
-          const driveViewUrl = driveFileId
-            ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing`
-            : rawUrl;
+          const driveViewUrl = ytEmbedUrl
+            ? youtubeWatchUrl(rawUrl)
+            : driveFileId
+              ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing`
+              : rawUrl;
 
           return (
             <motion.div
@@ -1162,13 +1195,23 @@ export default function App() {
                 className="absolute inset-0"
               >
                 {mediaOverlay.type === 'video' ? (
-                  embedUrl ? (
+                  ytEmbedUrl ? (
+                    <iframe
+                      key={ytEmbedUrl}
+                      src={ytEmbedUrl}
+                      title="Video de YouTube"
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      allowFullScreen
+                    />
+                  ) : embedUrl ? (
                     <DriveVideoPlayer key={mediaOverlay.url} driveUrl={mediaOverlay.url} fallbackEmbedUrl={embedUrl} />
                   ) : (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
                       <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
                       <h3 className="text-xl font-bold text-white mb-2">Enlace no válido</h3>
-                      <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un archivo de Google Drive válido.</p>
+                      <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un video de Google Drive o YouTube válido.</p>
                     </div>
                   )
                 ) : embedUrl ? (
@@ -1210,7 +1253,7 @@ export default function App() {
                     className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-xs font-bold backdrop-blur-sm hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    ABRIR EN GOOGLE DRIVE
+                    {ytEmbedUrl ? 'ABRIR EN YOUTUBE' : 'ABRIR EN GOOGLE DRIVE'}
                   </a>
                 )}
               </motion.div>

@@ -12,7 +12,7 @@ const APPS_SCRIPT_URL = (import.meta as any).env?.VITE_APPS_SCRIPT_URL || '';
 // 2. SHEETS_CONFIG - Google Sheets como BD
 // =============================================
 export const SHEETS_CONFIG = {
-  sheetId: '1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA',
+  sheetId: '1tngSSrn_0xXHJacyExpfH91b6MXsJOn8MlB0Okw-8tU',
   sheets: {
     learn: 'LEARN',
     data: 'DATA',
@@ -27,6 +27,7 @@ export const SHEETS_CONFIG = {
     pacProgramas: 'PAC_PROGRAMAS',
     pacPreguntas: 'PAC_PREGUNTAS',
     pacResultados: 'PAC_RESULTADOS',
+    encuestas: 'ENCUESTAS',
   },
   useMockDataOnError: true,
 } as const;
@@ -277,7 +278,10 @@ export function getPublicBaseUrl(): string {
 
 export function getSheetUrl(sheetName: string): string {
   const cacheBust = `&_t=${Date.now()}`;
-  return `https://docs.google.com/spreadsheets/d/${SHEETS_CONFIG.sheetId}/gviz/tq?tqx=out:csv&sheet=${sheetName}${cacheBust}`;
+  // headers=1 es obligatorio: sin él Google adivina cuántas filas son cabecera y,
+  // en hojas con columnas de texto vacías (p. ej. Video_4..6), fusiona la cabecera
+  // con la primera fila de datos ("Cod yu34"), dejando la hoja ilegible para la app.
+  return `https://docs.google.com/spreadsheets/d/${SHEETS_CONFIG.sheetId}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(sheetName)}${cacheBust}`;
 }
 
 export type AudienceProfile = typeof AUDIENCE_CONFIG.profiles[number];

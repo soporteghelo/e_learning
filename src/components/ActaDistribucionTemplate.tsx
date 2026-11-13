@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { ActaItem, AppDynamicConfig } from '../types';
 import type { FirmaRosterRow } from '../lib/firmaRoster';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 export interface DistribucionRow extends FirmaRosterRow {
   fotoBase64?: string;
@@ -68,15 +69,9 @@ const FORMATO_FECHA = '10/3/2025';
  * agregando una columna Foto con la selfie de verificación de cada firma.
  */
 const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribucionTemplateProps>((props, ref) => {
-  const { item, documentoTitulo, rows, appConfig } = props;
+  const { item, documentoTitulo, rows } = props;
 
-  const proxyUrl = (url?: string) => {
-    if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
-    const cleanUrl = url.replace(/^https?:\/\//, '');
-    return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
-  };
-
-  const logo = useMemo(() => proxyUrl(appConfig?.logoCertificado), [appConfig?.logoCertificado]);
+  const logo = GENERIC_LOGO_SRC;
 
   const cellStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '3px 5px', fontSize: '9px', verticalAlign: 'middle' };
   const labelStyle: React.CSSProperties = { ...cellStyle, fontWeight: 700, background: '#f3f4f6', whiteSpace: 'nowrap' };

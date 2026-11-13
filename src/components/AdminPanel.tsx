@@ -8,20 +8,21 @@ import {
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, MessageCircle, Undo2,
-  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
+  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award, Star,
   ClipboardCheck, ClipboardList, ExternalLink, Globe, ArrowUpDown, ArrowUp, ArrowDown,
   FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap, Upload
 } from 'lucide-react';
-import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
+import { ADMIN_CONFIG, AUDIENCE_CONFIG, SHEETS_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
   saveQuizToSheets, deleteQuizFromSheets,
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, updateUserSelfie, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, fetchAllCertificateRecords, updateUserProfile, updateUserSelfie, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
   fetchPacProgramas, createPacPrograma, updatePacPrograma, deletePacPrograma, upsertPacPreguntas,
   fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial, fetchPersonalActivo,
+  fetchAllEncuestas, SATISFACCION_PREGUNTAS,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
@@ -29,6 +30,7 @@ import type {
   ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress,
   ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig,
   PacPrograma, PacPregunta, PacResultado, PersonalActivo,
+  CertificateRecord, CursoEncuesta, SatisfaccionRating,
 } from '../types';
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
@@ -51,6 +53,14 @@ import { useQrDataUrl } from '../hooks/useQrDataUrl';
 import DiagnosticoPanel, { DiagnosticoButton } from './DiagnosticoPanel';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
+/** Datos de sesión (capacitador/horas/fecha) por curso para las actas de asistencia. */
+const ASISTENCIA_SESION_KEY = 'learndrive_asistencia_sesion';
+
+/** 'yyyy-MM-dd' (input date) → 'DD/MM/YYYY'; vacío si no hay fecha. */
+function toDisplayDate(iso: string): string {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
 
 /**
  * Genera el PDF y lo descarga a mano vía Blob + <a download>, en vez de
@@ -538,6 +548,169 @@ export default function AdminPanel({
   const [firmaPage, setFirmaPage] = useState(1);
   // Límite incremental para la lista de usuarios (evita renderizar cientos de filas a la vez)
   const [progressLimit, setProgressLimit] = useState(30);
+
+  // ===== Actas de Asistencia por Curso (AESA) =====
+  const [certRecords, setCertRecords] = useState<CertificateRecord[]>([]);
+  const [certRecordsLoading, setCertRecordsLoading] = useState(false);
+  const [courseAsistenciaData, setCourseAsistenciaData] = useState<{ doc: ActaDocumento; item: ActaItem; rows: AsistenciaRow[]; fecha: string } | null>(null);
+  const courseAsistenciaRef = useRef<HTMLDivElement>(null);
+  const [downloadingCourseAsistencia, setDownloadingCourseAsistencia] = useState(false);
+  const [generatingCourseKey, setGeneratingCourseKey] = useState<string | null>(null);
+  // Datos de la sesión por curso (capacitador / horas / fecha): no viven en ninguna
+  // hoja, así que se recuerdan localmente para no retipearlos en cada acta.
+  type SesionDatos = { capacitador: string; horas: string; fecha: string };
+  const [sesionPorCurso, setSesionPorCurso] = useState<Record<string, SesionDatos>>(() => {
+    try { return JSON.parse(localStorage.getItem(ASISTENCIA_SESION_KEY) || '{}'); } catch { return {}; }
+  });
+  const getSesion = (topicId: string): SesionDatos =>
+    sesionPorCurso[topicId] || { capacitador: '', horas: '', fecha: '' };
+  const updateSesion = (topicId: string, patch: Partial<SesionDatos>) => {
+    setSesionPorCurso(prev => {
+      const next = { ...prev, [topicId]: { ...getSesion(topicId), ...patch } };
+      try { localStorage.setItem(ASISTENCIA_SESION_KEY, JSON.stringify(next)); } catch { /* cuota llena */ }
+      return next;
+    });
+  };
+
+  // ===== Encuestas de satisfacción =====
+  const [encuestas, setEncuestas] = useState<CursoEncuesta[]>([]);
+  const [encuestasLoading, setEncuestasLoading] = useState(false);
+  const [expandedEncuesta, setExpandedEncuesta] = useState<string | null>(null);
+
+  const loadEncuestas = async () => {
+    setEncuestasLoading(true);
+    try { setEncuestas(await fetchAllEncuestas()); }
+    catch { /* ignore */ }
+    finally { setEncuestasLoading(false); }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'encuestas' && encuestas.length === 0) loadEncuestas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const loadCertRecords = async () => {
+    setCertRecordsLoading(true);
+    try {
+      const records = await fetchAllCertificateRecords();
+      setCertRecords(records);
+    } catch { /* ignore */ }
+    finally { setCertRecordsLoading(false); }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'asistencias') return;
+    if (certRecords.length === 0) loadCertRecords();
+    // El acta necesita área/empresa y la firma del consentimiento, que viven en INGRESOS.
+    if (ingresoRecords.length === 0) fetchAllIngresos().then(setIngresoRecords).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  /** Un registro por DNI (el más reciente), ya que un curso puede recertificarse. */
+  const certsDelCurso = (topicId: string): CertificateRecord[] => {
+    const porDni = new Map<string, CertificateRecord>();
+    for (const c of certRecords) {
+      if (c.topicId !== topicId) continue;
+      const prev = porDni.get(c.dni);
+      if (!prev || String(c.fecha) > String(prev.fecha)) porDni.set(c.dni, c);
+    }
+    return Array.from(porDni.values())
+      .sort((a, b) => `${a.apellidos} ${a.nombres}`.localeCompare(`${b.apellidos} ${b.nombres}`, 'es', { sensitivity: 'base' }));
+  };
+
+  /**
+   * Firma y foto efectivas de un certificado. Los certificados emitidos antes de
+   * que el backend registrara FIRMA/FOTO no traen URL; en ese caso se cae a la
+   * firma y la selfie del consentimiento del trabajador (INGRESOS), que son del
+   * mismo titular, para que el acta no salga con la columna de firmas vacía.
+   */
+  const firmaEfectiva = (c: CertificateRecord) => {
+    const ing = ingresoRecords.find(r => String(r.dni).trim() === c.dni);
+    return {
+      firmaUrl: c.firmaUrl || ing?.fotografiaUrl || '',
+      selfieUrl: c.selfieUrl || ing?.selfieUrl || '',
+    };
+  };
+
+  const handleGenerateCourseAsistencia = async (topic: LearnTopic) => {
+    setGeneratingCourseKey(topic.id);
+    try {
+      const topicCerts = certsDelCurso(topic.id);
+      if (topicCerts.length === 0) {
+        showToast('Nadie ha certificado este curso todavía', 'error');
+        return;
+      }
+      const rows: AsistenciaRow[] = await Promise.all(topicCerts.map(async (c): Promise<AsistenciaRow> => {
+        const ing = ingresoRecords.find(r => String(r.dni).trim() === c.dni);
+        const { firmaUrl, selfieUrl } = firmaEfectiva(c);
+        const [fotoBase64, firmaBase64] = await Promise.all([
+          fetchDriveImageAsBase64(selfieUrl),
+          fetchDriveImageAsBase64(firmaUrl),
+        ]);
+        const apellidos = c.apellidos || ing?.apellidos || '';
+        const nombres = c.nombres || ing?.nombres || '';
+        const cargo = c.cargo || ing?.cargo || '';
+        const area = ing?.area || '';
+        const empresa = ing?.empresa || '';
+        return {
+          dni: c.dni,
+          nombre: `${apellidos} ${nombres}`.trim() || c.dni,
+          apellidos, nombres, cargo, area, empresa,
+          correo: ing?.correo || '',
+          inicio: c.fecha,
+          firma: {
+            id: '', documentoId: '', documentoTitulo: '', dni: c.dni,
+            apellidos, nombres, cargo, area, empresa,
+            correo: ing?.correo || '', fechaFirma: c.fecha,
+            actaPdfUrl: c.pdfUrl, selfieUrl, firmaUrl,
+            firmaAsistenciaUrl: firmaUrl, correoEnviado: '', dispositivo: '', documentos: [],
+          },
+          fotoBase64: fotoBase64 || undefined,
+          firmaBase64: firmaBase64 || undefined,
+        };
+      }));
+      const sesion = getSesion(topic.id);
+      const doc: ActaDocumento = {
+        id: `course-${topic.id}`, titulo: topic.title, descripcion: topic.details,
+        perfiles: [], dnisAsignados: [], cuerpoHtml: '', items: [],
+        driveDocUrl: '', linkDrive: '', requiereFirmaDibujada: true,
+        activo: true, fechaCreacion: new Date().toISOString(),
+      };
+      const item: ActaItem = {
+        nombre: topic.title, categoria: 'capacitacion',
+        tema: topic.title, capacitador: sesion.capacitador || appConfig?.nombreRepresentante || '',
+        horas: sesion.horas, codigo: '', version: '', fechaVersion: '',
+      };
+      setCourseAsistenciaData({ doc, item, rows, fecha: toDisplayDate(sesion.fecha) });
+    } catch {
+      showToast('Error al generar la lista de asistencia', 'error');
+    } finally {
+      setGeneratingCourseKey(null);
+    }
+  };
+
+  const handleDownloadCourseAsistenciaPdf = async () => {
+    if (!courseAsistenciaData) return;
+    const element = courseAsistenciaRef.current;
+    if (!element) return;
+    setDownloadingCourseAsistencia(true);
+    const slug = (courseAsistenciaData.item.nombre || 'curso').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
+    const opt = {
+      margin: 5,
+      filename: `ACTA_ASISTENCIA_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+    };
+    try {
+      await downloadElementAsPdf(element, opt);
+      setCourseAsistenciaData(null);
+    } catch {
+      showToast('Error al generar el PDF', 'error');
+    } finally {
+      setDownloadingCourseAsistencia(false);
+    }
+  };
 
   // Lista de distribución por documento (item): key = `${docId}:${itemIndex}`
   const [generatingPdfKey, setGeneratingPdfKey] = useState<string | null>(null);
@@ -1902,9 +2075,9 @@ ${text}`;
   // ========== COPY CSV ==========
   const handleCopyContentCSV = () => {
     const active = draftContent;
-    const headers = 'Cod,IdMain,Tema,Contenido,Video_1,Video_2,Video_3,ComentarioVideo,PDF,Contexto,Orden';
+    const headers = 'Cod,IdMain,Tema,Contenido,Video_1,Video_2,Video_3,Video_4,Video_5,Video_6,ComentarioVideo,PDF,Contexto,Orden';
     const rows = active.map(c =>
-      `"${c.cod}","${c.idMain}","${c.tema}","${c.contenido.replace(/"/g, '""')}","${c.videos?.[0] || ''}","${c.videos?.[1] || ''}","${c.videos?.[2] || ''}","${(c.comentarioVideo || '').replace(/"/g, '""')}","${c.pdf || ''}","${c.contexto}","${c.order}"`
+      `"${c.cod}","${c.idMain}","${c.tema}","${c.contenido.replace(/"/g, '""')}","${c.videos?.[0] || ''}","${c.videos?.[1] || ''}","${c.videos?.[2] || ''}","${c.videos?.[3] || ''}","${c.videos?.[4] || ''}","${c.videos?.[5] || ''}","${(c.comentarioVideo || '').replace(/"/g, '""')}","${c.pdf || ''}","${c.contexto}","${c.order}"`
     ).join('\n');
     navigator.clipboard.writeText(`${headers}\n${rows}`);
     setStatusMessage({ type: 'success', text: 'Contenido copiado al portapapeles (CSV)' });
@@ -2272,6 +2445,8 @@ ${text}`;
     { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
     { key: 'pac', label: 'PAC', icon: GraduationCap, badge: pacProgramas.filter(p => p.activo).length || null },
     { key: 'actas', label: 'Documentos y Capacitaciones', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
+    { key: 'asistencias', label: 'Actas de Asistencia', icon: ClipboardCheck, badge: topics.length > 0 ? topics.length : null },
+    { key: 'encuestas', label: 'Encuestas', icon: Star, badge: encuestas.length > 0 ? encuestas.length : null },
     { key: 'config', label: 'Configuración', icon: Settings, badge: null },
   ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
 
@@ -2966,23 +3141,23 @@ ${text}`;
                                 {/* Media Section */}
                                 <div className="rounded-xl border-2 border-[#1b4d89]/20 bg-[#1b4d89]/5 p-5 space-y-4">
                                   <h4 className="text-xs font-bold uppercase text-[#00366b] tracking-[0.15em] flex items-center gap-2">
-                                    <Video className="w-4 h-4" /> Videos y Recursos Multimedia
+                                    <Video className="w-4 h-4" /> Video Cápsulas y Recursos Multimedia
                                   </h4>
-                                  {[0, 1, 2].map(idx => (
+                                  {[0, 1, 2, 3, 4, 5].map(idx => (
                                     <div key={idx}>
                                       <label className="text-[10px] font-medium text-[#424750] block mb-1.5 flex items-center gap-1.5">
                                         <Link2 className="w-3 h-3 text-[#1b4d89]" />
-                                        Video {idx + 1} <span className="text-[#737781]">(URL de Google Drive)</span>
+                                        Cápsula {idx + 1} <span className="text-[#737781]">(URL de Google Drive o YouTube)</span>
                                       </label>
                                       <input
                                         type="url"
                                         value={c.videos?.[idx] || ''}
                                         onChange={e => {
-                                          const newVideos = [...(c.videos || []), '', '', ''].slice(0, 3);
+                                          const newVideos = [...(c.videos || []), '', '', '', '', '', ''].slice(0, 6);
                                           newVideos[idx] = e.target.value;
                                           handleUpdateContent(c.cod, { videos: newVideos.filter((v, i) => v.trim() || i <= idx) });
                                         }}
-                                        placeholder="https://drive.google.com/file/d/..."
+                                        placeholder="https://drive.google.com/file/d/...  o  https://youtu.be/..."
                                         className="w-full bg-white border-b-2 border-[#c3c6d1]/30 focus:border-[#1b4d89] px-1 py-2.5 text-sm text-[#191c1d] font-mono placeholder-[#737781] outline-none transition-all"
                                       />
                                     </div>
@@ -5151,6 +5326,315 @@ ${text}`;
           </div>
         )}
 
+        {/* ====== TAB: ENCUESTAS DE SATISFACCIÓN ====== */}
+        {activeTab === 'encuestas' && (() => {
+          // Excelente=4 … Malo=1; el promedio se muestra sobre 4 y como % de satisfacción.
+          const VALOR: Record<SatisfaccionRating, number> = { Excelente: 4, Bueno: 3, Regular: 2, Malo: 1 };
+          const promedio = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0);
+          const notasDe = (rows: CursoEncuesta[]) => rows.flatMap(r => r.respuestas.map(x => VALOR[x] || 0)).filter(Boolean);
+          const colorPara = (p: number) => (p >= 3.5 ? 'text-emerald-600' : p >= 2.5 ? 'text-blue-600' : p >= 1.5 ? 'text-amber-600' : 'text-red-600');
+
+          const porCurso = topics
+            .map(t => ({ topic: t, rows: encuestas.filter(e => e.topicId === t.id) }))
+            .filter(g => g.rows.length > 0);
+          // Encuestas de cursos que ya no existen en LEARN: no se pierden del panel.
+          const idsConocidos = new Set(topics.map(t => t.id));
+          const huerfanas = encuestas.filter(e => !idsConocidos.has(e.topicId));
+
+          const exportarEncuestas = () => {
+            const rows = encuestas.map(e => {
+              const base: Record<string, string | number> = {
+                'CURSO': e.courseTitle,
+                'DNI': e.dni,
+                'APELLIDOS Y NOMBRES': `${e.apellidos} ${e.nombres}`.trim(),
+                'NOTA_QUIZ': e.nota,
+              };
+              SATISFACCION_PREGUNTAS.forEach((p, i) => { base[p] = e.respuestas[i] || ''; });
+              base['COMENTARIO'] = e.comentario;
+              base['FECHA'] = e.fecha;
+              return base;
+            });
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Encuestas');
+            XLSX.writeFile(wb, `encuestas_${new Date().toISOString().split('T')[0]}.xlsx`);
+            showToast('✓ Encuestas exportadas');
+          };
+
+          const globalProm = promedio(notasDe(encuestas));
+
+          return (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Star className="w-5 h-5 text-[#1b4d89]" />
+                  <div>
+                    <h2 className="text-lg font-black text-[#00366b]">Encuestas de Satisfacción</h2>
+                    <p className="text-xs text-[#737781]">Respuestas de los trabajadores al terminar el quiz de cada curso</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={loadEncuestas} disabled={encuestasLoading}
+                    className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all">
+                    <RefreshCw className={`w-4 h-4 ${encuestasLoading ? 'animate-spin' : ''}`} /> Actualizar
+                  </button>
+                  <button onClick={exportarEncuestas} disabled={encuestas.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40">
+                    <FileSpreadsheet className="w-4 h-4" /> Excel
+                  </button>
+                </div>
+              </div>
+
+              {encuestasLoading && encuestas.length === 0 ? (
+                <div className="flex flex-col items-center py-12"><Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin mb-2" /><p className="text-sm text-[#737781]">Cargando encuestas…</p></div>
+              ) : encuestas.length === 0 ? (
+                <div className="flex flex-col items-center py-12 text-center">
+                  <Star className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                  <p className="text-sm font-bold text-[#737781]">Sin respuestas todavía</p>
+                  <p className="text-xs text-[#737781] mt-1">La encuesta aparece al terminar el quiz de un curso. Las respuestas se mostrarán aquí.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Resumen global */}
+                  <div className="bg-white rounded-2xl border border-[#e1e3e4] px-5 py-4 flex flex-wrap items-center gap-6">
+                    <div>
+                      <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-0.5">Satisfacción general</p>
+                      <p className={`text-2xl font-black ${colorPara(globalProm)}`}>{globalProm.toFixed(2)}<span className="text-sm text-[#737781]">/4</span></p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-0.5">Equivale a</p>
+                      <p className={`text-2xl font-black ${colorPara(globalProm)}`}>{Math.round((globalProm / 4) * 100)}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-0.5">Respuestas</p>
+                      <p className="text-2xl font-black text-[#00366b]">{encuestas.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-0.5">Con comentario</p>
+                      <p className="text-2xl font-black text-[#00366b]">{encuestas.filter(e => e.comentario).length}</p>
+                    </div>
+                  </div>
+
+                  {/* Por curso */}
+                  <div className="space-y-3">
+                    {[...porCurso, ...(huerfanas.length > 0 ? [{ topic: { id: '__otros__', title: 'Cursos eliminados', details: '' } as LearnTopic, rows: huerfanas }] : [])].map(({ topic, rows }) => {
+                      const prom = promedio(notasDe(rows));
+                      const abierto = expandedEncuesta === topic.id;
+                      return (
+                        <div key={topic.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                          <div className="px-4 py-3.5 flex items-start gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+                              <Star className="w-5 h-5 text-amber-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-[#00366b] text-sm">{topic.title}</p>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full bg-[#f3f4f5] ${colorPara(prom)}`}>
+                                  {prom.toFixed(2)}/4 · {Math.round((prom / 4) * 100)}%
+                                </span>
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                  {rows.length} respuesta{rows.length !== 1 ? 's' : ''}
+                                </span>
+                              </div>
+                              {/* Promedio por pregunta */}
+                              <div className="mt-2 space-y-1">
+                                {SATISFACCION_PREGUNTAS.map((pregunta, i) => {
+                                  const p = promedio(rows.map(r => VALOR[r.respuestas[i]] || 0).filter(Boolean));
+                                  return (
+                                    <div key={i} className="flex items-center gap-2">
+                                      <span className="text-[10px] text-[#737781] flex-1 truncate">{pregunta}</span>
+                                      <div className="w-24 flex-shrink-0"><ProgressBar value={p} max={4} /></div>
+                                      <span className={`text-[10px] font-black w-8 text-right ${colorPara(p)}`}>{p.toFixed(1)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <button onClick={() => setExpandedEncuesta(abierto ? null : topic.id)}
+                              title="Ver detalle" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors flex-shrink-0">
+                              {abierto ? <ChevronUp className="w-4 h-4 text-[#1b4d89]" /> : <ChevronDown className="w-4 h-4 text-[#1b4d89]" />}
+                            </button>
+                          </div>
+
+                          {abierto && (
+                            <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa] overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[9px] text-[#737781] uppercase font-bold">
+                                    <th className="text-left pb-1 pr-3">DNI</th>
+                                    <th className="text-left pb-1 pr-3">Apellidos y Nombres</th>
+                                    {SATISFACCION_PREGUNTAS.map((_, i) => <th key={i} className="text-center pb-1 pr-2">P{i + 1}</th>)}
+                                    <th className="text-left pb-1 pr-3">Comentario</th>
+                                    <th className="text-left pb-1">Fecha</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#f3f4f5]">
+                                  {rows.map((e, i) => (
+                                    <tr key={`${e.dni}-${e.topicId}-${i}`}>
+                                      <td className="py-1.5 pr-3 font-mono text-[#737781]">{e.dni}</td>
+                                      <td className="py-1.5 pr-3 font-semibold text-[#424750] whitespace-nowrap">{`${e.apellidos} ${e.nombres}`.trim() || '—'}</td>
+                                      {SATISFACCION_PREGUNTAS.map((_, qi) => {
+                                        const r = e.respuestas[qi];
+                                        return <td key={qi} className={`py-1.5 pr-2 text-center font-bold ${r ? colorPara(VALOR[r]) : 'text-[#c3c6d1]'}`}>{r ? r.charAt(0) : '—'}</td>;
+                                      })}
+                                      <td className="py-1.5 pr-3 text-[#424750] max-w-[280px]">{e.comentario || <span className="text-[#c3c6d1]">—</span>}</td>
+                                      <td className="py-1.5 text-[#737781] whitespace-nowrap">{e.fecha || '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              <p className="text-[9px] text-[#737781] mt-2">P1–P{SATISFACCION_PREGUNTAS.length}: E=Excelente · B=Bueno · R=Regular · M=Malo</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ====== TAB: ACTAS DE ASISTENCIA POR CURSO ====== */}
+        {activeTab === 'asistencias' && (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="w-5 h-5 text-[#1b4d89]" />
+                <div>
+                  <h2 className="text-lg font-black text-[#00366b]">Actas de Asistencia por Curso</h2>
+                  <p className="text-xs text-[#737781]">Genera el acta AESA con las firmas de quienes completaron y certificaron cada curso</p>
+                </div>
+              </div>
+              <button onClick={() => loadCertRecords()} disabled={certRecordsLoading}
+                className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all">
+                <RefreshCw className={`w-4 h-4 ${certRecordsLoading ? 'animate-spin' : ''}`} /> Actualizar
+              </button>
+            </div>
+
+            {certRecordsLoading && certRecords.length === 0 ? (
+              <div className="flex flex-col items-center py-12"><Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin mb-2" /><p className="text-sm text-[#737781]">Cargando certificados…</p></div>
+            ) : topics.length === 0 ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <ClipboardCheck className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                <p className="text-sm font-bold text-[#737781]">Sin cursos</p>
+                <p className="text-xs text-[#737781] mt-1">Crea cursos en la pestaña "Cursos" para poder generar actas de asistencia</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topics.filter(t => t.active !== false).map(topic => {
+                  const topicCerts = certsDelCurso(topic.id);
+                  const conFirma = topicCerts.filter(c => firmaEfectiva(c).firmaUrl).length;
+                  const sesion = getSesion(topic.id);
+                  const isGenerating = generatingCourseKey === topic.id;
+                  return (
+                    <div key={topic.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                      <div className="px-4 py-3.5 flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
+                          <GraduationCap className="w-5 h-5 text-violet-700" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[#00366b] text-sm">{topic.title}</p>
+                          {topic.details && <p className="text-xs text-[#737781] mt-0.5 line-clamp-1">{topic.details}</p>}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 flex items-center gap-1">
+                              <GraduationCap className="w-2.5 h-2.5" /> Curso
+                            </span>
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex items-center gap-1">
+                              <Award className="w-2.5 h-2.5" /> {topicCerts.length} certificado{topicCerts.length !== 1 ? 's' : ''}
+                            </span>
+                            {topicCerts.length > 0 && (
+                              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> {conFirma} firma{conFirma !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button onClick={() => handleGenerateCourseAsistencia(topic)} disabled={topicCerts.length === 0 || isGenerating}
+                          title="Generar acta de asistencia en PDF (plantilla AESA)"
+                          className="flex items-center gap-1.5 px-3 py-2 bg-[#1b4d89] text-white rounded-lg text-[10px] font-bold hover:bg-[#00366b] transition-all disabled:opacity-40 flex-shrink-0">
+                          {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                          Acta PDF
+                        </button>
+                      </div>
+
+                      {/* Datos de la sesión que van en el encabezado del acta */}
+                      {topicCerts.length > 0 && (
+                        <div className="border-t border-[#f3f4f5] px-4 py-2.5 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-[9px] font-bold text-[#737781] uppercase tracking-wider block mb-1">Capacitador</label>
+                            <input value={sesion.capacitador} onChange={e => updateSesion(topic.id, { capacitador: e.target.value })}
+                              placeholder={appConfig?.nombreRepresentante || 'Nombre del capacitador'}
+                              className="w-full px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-[#737781] uppercase tracking-wider block mb-1">N° de horas</label>
+                            <input value={sesion.horas} onChange={e => updateSesion(topic.id, { horas: e.target.value })}
+                              placeholder="Ej. 2"
+                              className="w-full px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-[#737781] uppercase tracking-wider block mb-1">Fecha de la capacitación</label>
+                            <input type="date" value={sesion.fecha} onChange={e => updateSesion(topic.id, { fecha: e.target.value })}
+                              className="w-full px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lista de certificados del curso */}
+                      {topicCerts.length > 0 && (
+                        <div className="border-t border-[#f3f4f5] px-4 py-2.5 bg-[#f8f9fa]">
+                          <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
+                            Participantes certificados ({topicCerts.length})
+                          </p>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-[9px] text-[#737781] uppercase font-bold">
+                                  <th className="text-left pb-1 pr-3">DNI</th>
+                                  <th className="text-left pb-1 pr-3">Apellidos y Nombres</th>
+                                  <th className="text-left pb-1 pr-3">Cargo</th>
+                                  <th className="text-center pb-1 pr-3">Nota</th>
+                                  <th className="text-center pb-1 pr-3">Firma</th>
+                                  <th className="text-left pb-1">Fecha</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#f3f4f5]">
+                                {topicCerts.map(c => {
+                                  const ing = ingresoRecords.find(r => String(r.dni).trim() === c.dni);
+                                  const tieneFirma = !!firmaEfectiva(c).firmaUrl;
+                                  const nombreCompleto = `${c.apellidos || ing?.apellidos || ''} ${c.nombres || ing?.nombres || ''}`.trim();
+                                  return (
+                                    <tr key={`${c.dni}-${c.topicId}`}>
+                                      <td className="py-1.5 pr-3 font-mono text-[#737781]">{c.dni}</td>
+                                      <td className="py-1.5 pr-3 font-semibold text-[#424750]">{nombreCompleto || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-[#737781]">{c.cargo || ing?.cargo || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-center">
+                                        <span className={`font-bold ${parseFloat(c.nota) >= 14 ? 'text-emerald-600' : 'text-amber-600'}`}>{c.nota || '—'}</span>
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-center">
+                                        {tieneFirma
+                                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 font-bold text-[10px]"><CheckCircle2 className="w-3 h-3" /> Sí</span>
+                                          : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 font-bold text-[10px]">Sin firma</span>}
+                                      </td>
+                                      <td className="py-1.5 text-[#737781]">{c.fecha || '—'}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ====== TAB: CONFIGURACIÓN ====== */}
         {activeTab === 'config' && (
           <div className="space-y-4">
@@ -5191,10 +5675,6 @@ ${text}`;
                   {configDraft.status === 'Inactivo' && (
                     <p className="text-[10px] font-semibold text-[#ba1a1a] mt-1.5">⚠ "Inactivo" bloquea el acceso a toda la app para los usuarios.</p>
                   )}
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Logo del certificado (URL)</label>
-                  <input type="text" value={configDraft.logoCertificado || ''} onChange={e => handleUpdateConfigDraft({ logoCertificado: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Firma del representante (URL)</label>
@@ -5359,6 +5839,48 @@ ${text}`;
                   item={asistenciaData.item}
                   rows={asistenciaData.rows}
                   appConfig={appConfig ?? null}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Vista previa de la lista de asistencia POR CURSO — el usuario confirma antes de exportar */}
+      <AnimatePresence>
+        {courseAsistenciaData && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4"
+            onClick={() => !downloadingCourseAsistencia && setCourseAsistenciaData(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-[95vw] max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[#e1e3e4] flex-shrink-0">
+                <p className="font-bold text-[#00366b] text-sm">Vista previa — Acta de Asistencia (Curso)</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCourseAsistenciaData(null)} disabled={downloadingCourseAsistencia}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#737781] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
+                    Cancelar
+                  </button>
+                  <button onClick={handleDownloadCourseAsistenciaPdf} disabled={downloadingCourseAsistencia}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-[#1b4d89] text-white hover:bg-[#00366b] transition-all disabled:opacity-50">
+                    {downloadingCourseAsistencia ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    Descargar PDF
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 bg-[#f3f4f5]">
+                <ActaAsistenciaTemplate
+                  ref={courseAsistenciaRef}
+                  doc={courseAsistenciaData.doc}
+                  item={courseAsistenciaData.item}
+                  rows={courseAsistenciaData.rows}
+                  appConfig={appConfig ?? null}
+                  fecha={courseAsistenciaData.fecha}
                 />
               </div>
             </motion.div>
@@ -5811,7 +6333,7 @@ ${text}`;
 
       {/* Floating Sheets shortcut */}
       <a
-        href="https://docs.google.com/spreadsheets/d/1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA/edit?usp=sharing"
+        href={`https://docs.google.com/spreadsheets/d/${SHEETS_CONFIG.sheetId}/edit`}
         target="_blank"
         rel="noopener noreferrer"
         title="Abrir Google Sheets"

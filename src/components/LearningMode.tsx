@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
+import CapsuleCarousel from './CapsuleCarousel';
 import {
   ChevronLeft, ChevronRight, CheckCircle2,
   Play, FileText, ChevronDown, BookOpen, ListChecks, Award
 } from 'lucide-react';
 import type { LearnTopic, DataChunk } from '../types';
+import { youtubeThumbUrl } from '../lib/youtube';
 
 interface LearningModeProps {
   topic: LearnTopic;
@@ -19,6 +21,8 @@ interface LearningModeProps {
 
 function getDriveThumbUrl(url: string): string {
   if (!url) return '';
+  const yt = youtubeThumbUrl(url);
+  if (yt) return yt;
   const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/];
   for (const p of patterns) {
     const m = url.match(p);
@@ -286,46 +290,50 @@ export default function LearningMode({
                     >
                       {/* Video cards */}
                       {currentChunk.videos.length > 0 && (
-                        <div className={`grid gap-3 mb-4 ${currentChunk.videos.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                          {currentChunk.videos.map((videoUrl, idx) => {
-                            const thumbUrl = getDriveThumbUrl(videoUrl);
-                            return (
-                              <motion.button
-                                key={`vid-${idx}`}
-                                onClick={() => onOpenMedia(videoUrl, 'video')}
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.97 }}
-                                className="group relative w-full overflow-hidden rounded-2xl bg-slate-900 border border-white/10 hover:border-blue-500/60 transition-all shadow-lg"
-                                style={{ aspectRatio: '16/9' }}
-                              >
-                                {thumbUrl && (
-                                  <img
-                                    src={thumbUrl}
-                                    alt={`Video ${idx + 1}`}
-                                    className="absolute inset-0 w-full h-full object-cover"
-                                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                                  />
-                                )}
-                                {!thumbUrl && <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950" />}
-                                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-all duration-300" />
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                  <div className="w-14 h-14 rounded-full bg-black/50 backdrop-blur border-2 border-white/30 flex items-center justify-center group-hover:bg-blue-600 group-hover:border-blue-400 group-hover:scale-110 transition-all duration-300 shadow-2xl">
-                                    <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                        currentChunk.videos.length === 1 ? (
+                          /* Video único: card grande */
+                          <div className="mb-4">
+                            {currentChunk.videos.map((videoUrl, idx) => {
+                              const thumbUrl = getDriveThumbUrl(videoUrl);
+                              return (
+                                <motion.button
+                                  key={`vid-${idx}`}
+                                  onClick={() => onOpenMedia(videoUrl, 'video')}
+                                  whileHover={{ scale: 1.02 }}
+                                  whileTap={{ scale: 0.97 }}
+                                  className="group relative w-full overflow-hidden rounded-2xl bg-slate-900 border border-white/10 hover:border-blue-500/60 transition-all shadow-lg"
+                                  style={{ aspectRatio: '16/9' }}
+                                >
+                                  {thumbUrl && (
+                                    <img src={thumbUrl} alt="Video" className="absolute inset-0 w-full h-full object-cover"
+                                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                                  )}
+                                  {!thumbUrl && <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950" />}
+                                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/25 transition-all duration-300" />
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-14 h-14 rounded-full bg-black/50 backdrop-blur border-2 border-white/30 flex items-center justify-center group-hover:bg-blue-600 group-hover:border-blue-400 group-hover:scale-110 transition-all duration-300 shadow-2xl">
+                                      <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                                    </div>
                                   </div>
-                                </div>
-                                <div className="absolute bottom-0 inset-x-0 px-3 py-2.5 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-[9px] font-black text-white/90 uppercase tracking-wider">
-                                      {currentChunk.videos.length > 1 ? `Video ${idx + 1}` : 'Reproducir'}
-                                    </span>
+                                  <div className="absolute bottom-0 inset-x-0 px-3 py-2.5 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                      <span className="text-[9px] font-black text-white/90 uppercase tracking-wider">Reproducir</span>
+                                    </div>
+                                    <span className="text-[9px] text-white/40 font-medium">Modo Cine</span>
                                   </div>
-                                  <span className="text-[9px] text-white/40 font-medium">Modo Cine</span>
-                                </div>
-                              </motion.button>
-                            );
-                          })}
-                        </div>
+                                </motion.button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          /* Múltiples videos: carrusel de cápsulas */
+                          <CapsuleCarousel
+                            videos={currentChunk.videos}
+                            getThumb={getDriveThumbUrl}
+                            onOpen={url => onOpenMedia(url, 'video')}
+                          />
+                        )
                       )}
 
                       {/* PDF y Comentario */}

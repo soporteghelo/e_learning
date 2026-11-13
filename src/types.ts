@@ -164,7 +164,40 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'pac' | 'actas' | 'config';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'pac' | 'actas' | 'asistencias' | 'encuestas' | 'config';
+
+/**
+ * Encuesta de satisfacción que el trabajador responde al terminar el quiz de un
+ * curso. `respuestas` lleva una calificación por cada pregunta de
+ * SATISFACCION_PREGUNTAS, en el mismo orden.
+ */
+export interface CursoEncuesta {
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  topicId: string;
+  courseTitle: string;
+  nota: number;                      // nota del quiz que acaba de rendir
+  respuestas: SatisfaccionRating[];
+  comentario: string;
+  fecha: string;
+}
+
+/** Registro individual de un certificado emitido (fila de la hoja CERTIFICADOS). */
+export interface CertificateRecord {
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  topicId: string;
+  courseTitle: string;
+  nota: string;
+  pdfUrl: string;
+  firmaUrl: string;
+  selfieUrl: string;
+  cargo: string;
+  celular: string;
+  fecha: string;
+}
 
 export type AppView =
   | 'login'

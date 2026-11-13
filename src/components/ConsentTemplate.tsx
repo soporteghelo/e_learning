@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { AppDynamicConfig } from '../types';
 import { CONSENT_PARRAFOS, CONSENT_CHECKBOX_LABEL } from '../lib/consentText';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 // Vite raw import de la plantilla HTML (mismo patrón que certificado/acta)
 // @ts-ignore
@@ -22,7 +23,6 @@ interface ConsentTemplateProps {
   timestamp: string;      // fecha/hora Lima legible
   dispositivo: string;
   appConfig: AppDynamicConfig | null;
-  logoSrc?: string;
   /** Folio de verificación único de la constancia. */
   folio?: string;
 }
@@ -74,19 +74,13 @@ function blank(val: string | undefined, minWidth = '45px'): string {
 }
 
 const ConsentTemplate = React.forwardRef<HTMLDivElement, ConsentTemplateProps>((props, ref) => {
-  const { signer, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, folio } = props;
-
-  const proxyUrl = (url?: string) => {
-    if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
-    const cleanUrl = url.replace(/^https?:\/\//, '');
-    return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
-  };
+  const { signer, signatureData, selfieData, timestamp, dispositivo, appConfig, folio } = props;
 
   const finalHtml = useMemo(() => {
     const now = new Date();
     const currentDate = now.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const nombreCompleto = `${signer.apellidos || ''} ${signer.nombres || ''}`.trim().toUpperCase();
-    const logo = proxyUrl(logoSrc || appConfig?.logoCertificado) || 'https://via.placeholder.com/150x40?text=LOGO';
+    const logo = GENERIC_LOGO_SRC;
     const areaEmpresa = [signer.area, signer.empresa].filter(Boolean).join(' · ');
 
     const parrafosHtml = CONSENT_PARRAFOS
@@ -109,7 +103,7 @@ const ConsentTemplate = React.forwardRef<HTMLDivElement, ConsentTemplateProps>((
       device_info: dispositivo ? `Dispositivo: ${escapeHtml(simplifyDevice(dispositivo))}` : 'Registro almacenado en el sistema de gestión SST',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signer, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, folio]);
+  }, [signer, signatureData, selfieData, timestamp, dispositivo, appConfig, folio]);
 
   return (
     <div

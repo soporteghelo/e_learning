@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { AppDynamicConfig } from '../types';
+import { GENERIC_LOGO_SRC } from '../lib/genericLogo';
 
 export interface PacConstanciaData {
   programaNombre: string;
@@ -37,14 +38,9 @@ function esc(s: string | undefined): string {
  * firma + selfie de verificación centradas en su celda.
  */
 const PacConstanciaTemplate = React.forwardRef<HTMLDivElement, PacConstanciaTemplateProps>((props, ref) => {
-  const { data, appConfig } = props;
+  const { data } = props;
 
-  const proxyUrl = (url?: string) => {
-    if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
-    const cleanUrl = url.replace(/^https?:\/\//, '');
-    return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
-  };
-  const logo = useMemo(() => proxyUrl(appConfig?.logoCertificado), [appConfig?.logoCertificado]);
+  const logo = GENERIC_LOGO_SRC;
 
   const now = new Date();
   const fecha = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} - (${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')})`;

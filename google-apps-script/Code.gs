@@ -20,7 +20,7 @@
  * 7. Quién tiene acceso: Cualquiera (Anyone).
  */
 
-const SPREADSHEET_ID = '1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA';
+const SPREADSHEET_ID = '1tngSSrn_0xXHJacyExpfH91b6MXsJOn8MlB0Okw-8tU';
 const QUIZ_SHEET_NAME = 'QUIZ';
 const DATA_SHEET_NAME = 'DATA';
 const INGRESOS_SHEET_NAME = 'INGRESOS';
@@ -48,7 +48,7 @@ const PERSONAL_PADRON_SHEET_NAME = 'REGISTER';
 //   <RAÍZ>/CERTIFICADOS
 //   <RAÍZ>/ACTAS/DOCUMENTOS          → archivos a entregar (los sube el admin)
 //   <RAÍZ>/ACTAS/DOC_ENTREGAS/<DNI>/ → actas firmadas por persona
-const PROJECT_ROOT_FOLDER_ID = '1bi_81jpB1fEYVE8qnPjOT5wLxCH03zmy';
+const PROJECT_ROOT_FOLDER_ID = '1FoZLdcX-G-QM4dvOAzCmbnYfmMqyJs2p';
 
 // Nombres de las subcarpetas dentro de la raíz (no son IDs; se resuelven por nombre).
 const CERT_FOLDER_NAME  = 'CERTIFICADOS';
@@ -283,6 +283,8 @@ function doPost(e) {
       return deleteShortEval(ss, data);
     } else if (data.action === 'saveShortEvalResult') {
       return saveShortEvalResult(ss, data);
+    } else if (data.action === 'saveCursoEncuesta') {
+      return saveCursoEncuesta(ss, data);
     } else if (data.action === 'deleteShortEvalResult') {
       return deleteShortEvalResult(ss, data);
     } else if (data.action === 'createPacPrograma') {
@@ -468,9 +470,11 @@ function deleteQuiz(sheet, quizIds) {
 function upsertContent(sheet, chunks) {
   var firstRow = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
   if (!firstRow[0] || String(firstRow[0]).trim() === '') {
-    var dataHeaders = ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'];
+    var dataHeaders = ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'Video_4', 'Video_5', 'Video_6', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'];
     sheet.getRange(1, 1, 1, dataHeaders.length).setValues([dataHeaders]);
   }
+  // Hojas creadas con solo 3 columnas de video: se añaden las de las cápsulas 4-6.
+  ['Video_4', 'Video_5', 'Video_6'].forEach(function(h) { getOrCreateColumn(sheet, h); });
 
   chunks.forEach(function(c) {
     var data = sheet.getDataRange().getValues();
@@ -1004,12 +1008,18 @@ function saveCertificate(ss, data) {
     pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     const pdfUrl = pdfFile.getUrl();
 
+    // Las URL de firma y selfie se registran en CERTIFICADOS (FIRMA / FOTO): de ahí
+    // las toma el acta de asistencia por curso del panel admin.
+    let selfieUrl = '';
+    let signatureUrl = '';
+
     if (data.selfieBase64) {
       const rawSelfie = data.selfieBase64.includes(',') ? data.selfieBase64.split(',')[1] : data.selfieBase64;
       const selfieFilename = `${courseSlug}_SELFIE_${dni}_${now.getTime()}.jpg`;
       const selfieBlob = Utilities.newBlob(Utilities.base64Decode(rawSelfie), 'image/jpeg', selfieFilename);
       const selfieFile = dniFolder.createFile(selfieBlob);
       selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      selfieUrl = selfieFile.getUrl();
     }
 
     if (data.signatureBase64) {
@@ -1018,6 +1028,7 @@ function saveCertificate(ss, data) {
       const signatureBlob = Utilities.newBlob(Utilities.base64Decode(rawSignature), 'image/png', signatureFilename);
       const signatureFile = dniFolder.createFile(signatureBlob);
       signatureFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      signatureUrl = signatureFile.getUrl();
     }
 
     const ingresosSheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
@@ -1043,6 +1054,8 @@ function saveCertificate(ss, data) {
       var hRow = certSheet.getRange(1, 1, 1, certSheet.getLastColumn()).getValues()[0];
       if (hRow.indexOf('TITULO_CERTIFICADO') === -1) certSheet.getRange(1, certSheet.getLastColumn() + 1).setValue('TITULO_CERTIFICADO');
       if (hRow.indexOf('TopicId') === -1) certSheet.getRange(1, certSheet.getLastColumn() + 1).setValue('TopicId');
+      getOrCreateColumn(certSheet, 'FOTO');
+      getOrCreateColumn(certSheet, 'FIRMA');
     }
     const info = getIngresoInfoByDni(ingresosSheet, dni);
     appendCertificateRecord(certSheet, {
@@ -1053,7 +1066,7 @@ function saveCertificate(ss, data) {
       cargo: data.cargo || info.cargo || '',
       nota: data.nota || info.nota || '',
       celular: data.celular || info.celular || '',
-      firma: '', foto: '',
+      firma: signatureUrl, foto: selfieUrl,
       linkCertificado: pdfUrl,
       fecha: now,
       tituloCertificado: data.courseTitle || '',
@@ -1110,6 +1123,8 @@ function appendCertificateRecord(sheet, record) {
   rowData[colMap['CELULAR']] = record.celular;
   rowData[colMap['LinkCertificado']] = record.linkCertificado;
   rowData[colMap['Fecha']] = record.fecha;
+  if (colMap['FOTO'] !== undefined) rowData[colMap['FOTO']] = record.foto || '';
+  if (colMap['FIRMA'] !== undefined) rowData[colMap['FIRMA']] = record.firma || '';
   if (colMap['TITULO_CERTIFICADO'] !== undefined) rowData[colMap['TITULO_CERTIFICADO']] = record.tituloCertificado || '';
   if (colMap['TopicId'] !== undefined) rowData[colMap['TopicId']] = record.topicId || '';
 
@@ -1291,6 +1306,48 @@ function deleteShortEvalResult(ss, data) {
   rows.forEach(function (row) { sheet.deleteRow(row); });
   SpreadsheetApp.flush();
   return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: rows.length });
+}
+
+// =============================================
+// ENCUESTAS DE SATISFACCIÓN (al terminar el quiz de un curso)
+// =============================================
+
+var ENCUESTAS_SHEET_NAME = 'ENCUESTAS';
+var ENCUESTAS_HEADERS = ['DNI', 'Apellidos', 'Nombres', 'TopicId', 'CourseTitle', 'Nota', 'R1', 'R2', 'R3', 'R4', 'Comentario', 'Fecha'];
+
+function saveCursoEncuesta(ss, data) {
+  var sheet = getOrCreateSheetWithHeaders(ss, ENCUESTAS_SHEET_NAME, ENCUESTAS_HEADERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  var dni = String(data.dni || '').trim();
+  var topicId = String(data.topicId || '').trim();
+  if (!dni || !topicId) return createResponse({ status: 'error', message: 'DNI y curso requeridos' });
+
+  // Una encuesta por curso y persona: si reintenta el quiz no se vuelve a registrar.
+  var dupExists = findRowsByColumnValue_(sheet, 'DNI', dni)
+    .some(function (m) { return String(rowToObject_(m.headers, m.values).TopicId).trim() === topicId; });
+  if (dupExists) {
+    return createResponse({ status: 'ok', message: 'Encuesta ya registrada', duplicate: true });
+  }
+
+  var respuestas = data.respuestas || [];
+  var rowData = buildRowFromObject(headers, {
+    DNI: dni,
+    Apellidos: String(data.apellidos || '').trim(),
+    Nombres: String(data.nombres || '').trim(),
+    TopicId: topicId,
+    CourseTitle: String(data.courseTitle || '').trim(),
+    Nota: data.nota !== undefined ? data.nota : '',
+    R1: respuestas[0] || '',
+    R2: respuestas[1] || '',
+    R3: respuestas[2] || '',
+    R4: respuestas[3] || '',
+    Comentario: String(data.comentario || '').trim(),
+    Fecha: nowPeruString()
+  });
+  sheet.appendRow(rowData);
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Encuesta guardada' });
 }
 
 // =============================================
@@ -1862,10 +1919,10 @@ function saveOnboardingConsent(ss, data) {
       DNI: dni,
       Inicio: nowPeruString(),
       Avance: '0%',
-      Publico: '',
+      Publico: data.publico || '',
       Nota: '',
       UltimoAcceso: nowPeruString(),
-      Dispositivo: '',
+      Dispositivo: data.dispositivo || '',
       ModulosCompletados: '0',
       IntentosQuiz: '0',
       TiempoTotal: '0 min',
@@ -2233,13 +2290,14 @@ function crearEstructuraProyecto() {
 function getSheetDefinitions() {
   return {
     'LEARN': ['Id', 'Titulo', 'Publico', 'Detalles', 'Resumen', 'PuntosClave', 'Orden', 'Activo'],
-    'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
+    'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'Video_4', 'Video_5', 'Video_6', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
     'QUIZ': ['IdQuiz', 'IdMain', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Dificultad', 'Categoria_contenido'],
     'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FOTOGRAFIA', 'SELFIE', 'CERTIFICADO_USO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2', 'CONSENTIMIENTO_OK'],
     'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista', 'Tutorial', 'Actas', 'RUC', 'ActividadEconomica', 'Domicilio'],
     'CERTIFICADOS': ['Id', 'DNI', 'APELLIDOS', 'NOMBRES', 'CARGO', 'NOTA', 'CELULAR', 'FOTO', 'TITULO_CERTIFICADO', 'LinkCertificado', 'Fecha', 'FIRMA', 'TopicId'],
     'SHORT_EVALUACIONES': SHORT_EVALS_HEADERS,
     'SHORT_RESULTADOS': SHORT_RESULTS_HEADERS,
+    'ENCUESTAS': ENCUESTAS_HEADERS,
     'ACTAS_DOCUMENTOS': ACTAS_DOCS_HEADERS,
     'ACTAS_FIRMAS': ACTAS_FIRMAS_HEADERS,
     'PAC_PROGRAMAS': PAC_PROGRAMAS_HEADERS,

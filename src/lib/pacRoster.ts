@@ -34,6 +34,18 @@ interface RosterIngreso {
   publico?: string;
 }
 
+// Perfiles ("publico") ya separados de cada ingreso: el mismo INGRESOS se cruza
+// contra todas las capacitaciones, así que se parsea una vez por persona.
+const audienciasCache = new WeakMap<RosterIngreso, string[]>();
+const audienciasDe = (r: RosterIngreso) => {
+  let auds = audienciasCache.get(r);
+  if (!auds) {
+    auds = String(r.publico || '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+    audienciasCache.set(r, auds);
+  }
+  return auds;
+};
+
 export function buildPacRoster(
   programa: PacPrograma,
   resultados: PacResultado[],
@@ -75,15 +87,19 @@ export function buildPacRoster(
   // Por perfil (audiencia)
   if (perfilesLower.length > 0) {
     ingresos.forEach(r => {
-      const auds = String(r.publico || '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+      const auds = audienciasDe(r);
       if (auds.some(a => perfilesLower.includes(a))) addFromIngreso(r);
     });
   }
-  // Por DNI explícito
+  // Por DNI explícito (índice por DNI: evita recorrer INGRESOS entero por cada asignado)
+  const ingresoByDni = new Map<string, RosterIngreso>();
+  if (programa.dnisAsignados.length > 0) {
+    ingresos.forEach(r => { const k = String(r.dni).trim(); if (!ingresoByDni.has(k)) ingresoByDni.set(k, r); });
+  }
   programa.dnisAsignados.forEach(dniRaw => {
     const dni = String(dniRaw).trim();
     if (!dni || roster.has(dni)) return;
-    const ing = ingresos.find(r => String(r.dni).trim() === dni);
+    const ing = ingresoByDni.get(dni);
     if (ing) { addFromIngreso(ing); return; }
     const { status, intentosUsados, mejorNota, ultimoIntento } = statusFor(dni);
     const ultimo = ultimoIntento;

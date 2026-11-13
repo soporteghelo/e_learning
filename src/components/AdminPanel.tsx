@@ -33,11 +33,13 @@ import type {
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
 import { buildFirmaRoster, buildItemRoster, type FirmaRosterRow } from '../lib/firmaRoster';
-import { buildPacRoster, type PacRosterStatus } from '../lib/pacRoster';
-import { buildPacPadronRoster } from '../lib/pacPadron';
+import { buildPacRoster, type PacRosterStatus, type PacRosterRow } from '../lib/pacRoster';
+import { buildPacPadronRoster, type PacPadronRow } from '../lib/pacPadron';
 import { buildWhatsAppLink } from '../lib/whatsapp';
 import PacPendientesPanel from './PacPendientesPanel';
 import PacRegistroF62Modal from './PacRegistroF62Modal';
+import Pager from './Pager';
+import ExtractingLoader, { ExtractingInline } from './ExtractingLoader';
 import { GUARDIAS } from '../lib/constants';
 import { BarChart, Donut, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
@@ -82,24 +84,6 @@ async function downloadElementAsPdf(element: HTMLElement, opt: DownloadPdfOption
 // Filas por página en tablas grandes (resultados de evals cortas y firmas de actas)
 const TABLE_PAGE_SIZE = 25;
 
-/** Paginador compacto para tablas grandes. */
-function Pager({ page, totalPages, total, onPage }: { page: number; totalPages: number; total: number; onPage: (p: number) => void }) {
-  if (totalPages <= 1) return null;
-  const from = (page - 1) * TABLE_PAGE_SIZE + 1;
-  const to = Math.min(page * TABLE_PAGE_SIZE, total);
-  return (
-    <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-[#f3f4f5]">
-      <span className="text-[10px] text-[#737781]">{from}–{to} de {total}</span>
-      <div className="flex items-center gap-1">
-        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1}
-          className="px-2 py-1 rounded-md bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#424750] hover:bg-[#f3f4f5] disabled:opacity-40 disabled:cursor-not-allowed">‹ Ant.</button>
-        <span className="text-[10px] font-bold text-[#424750] px-1">Pág. {page}/{totalPages}</span>
-        <button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
-          className="px-2 py-1 rounded-md bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#424750] hover:bg-[#f3f4f5] disabled:opacity-40 disabled:cursor-not-allowed">Sig. ›</button>
-      </div>
-    </div>
-  );
-}
 
 /**
  * QR autogenerado del enlace de Drive del documento. Se muestra al asignar/listar documentos
@@ -490,6 +474,23 @@ export default function AdminPanel({
   const [personalLoading, setPersonalLoading] = useState(false);
   const [pacPendientesOpenId, setPacPendientesOpenId] = useState<string | null>(null);
   const [f62Programa, setF62Programa] = useState<PacPrograma | null>(null);
+
+  // Cruce de cada capacitación con sus asignados (INGRESOS) y con el padrón de
+  // personal activo. Se calcula una vez por cambio de datos y no en cada render:
+  // con miles de personas, rehacerlo por tarjeta en cada tecla trababa el admin.
+  const pacCruces = useMemo(() => {
+    const map = new Map<string, { roster: PacRosterRow[]; aprobados: number; padron: PacPadronRow[]; faltan: number }>();
+    if (activeTab !== 'pac') return map;
+    for (const p of pacProgramas) {
+      const roster = buildPacRoster(p, pacResultados, ingresoRecords);
+      const padron = buildPacPadronRoster(p, pacResultados, personalActivo);
+      map.set(p.id, {
+        roster, aprobados: roster.filter(r => r.status === 'aprobado').length,
+        padron, faltan: padron.filter(r => r.status === 'sin_intentos').length,
+      });
+    }
+    return map;
+  }, [activeTab, pacProgramas, pacResultados, ingresoRecords, personalActivo]);
   const [deletingPacResultado, setDeletingPacResultado] = useState<string | null>(null);
   const [pacAsistenciaData, setPacAsistenciaData] = useState<{ programa: PacPrograma; rows: PacAsistenciaRow[] } | null>(null);
   const [downloadingPacAsistencia, setDownloadingPacAsistencia] = useState(false);
@@ -4108,9 +4109,8 @@ ${text}`;
             </div>
 
             {pacLoading && pacProgramas.length === 0 ? (
-              <div className="flex flex-col items-center py-12 gap-2">
-                <Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin" />
-                <p className="text-xs text-[#737781]">Cargando programa de capacitaciones...</p>
+              <div className="bg-white rounded-2xl border border-[#e1e3e4] px-4">
+                <ExtractingLoader label="Extrayendo programa de capacitaciones" detail="Capacitaciones, resultados y padrón de personal" rows={4} />
               </div>
             ) : (
               <>
@@ -4177,10 +4177,11 @@ ${text}`;
                       <div className="space-y-3">
                         {pacProgramas.slice().sort((a, b) => (b.fechaProgramada || '').localeCompare(a.fechaProgramada || '')).map(p => {
                           const link = getPacEvalLink(p.id);
-                          const roster = buildPacRoster(p, pacResultados, ingresoRecords);
-                          const aprobadosCount = roster.filter(r => r.status === 'aprobado').length;
-                          const padron = buildPacPadronRoster(p, pacResultados, personalActivo);
-                          const faltanCount = padron.filter(r => r.status === 'sin_intentos').length;
+                          const cruce = pacCruces.get(p.id);
+                          const roster = cruce?.roster || [];
+                          const aprobadosCount = cruce?.aprobados || 0;
+                          const padron = cruce?.padron || [];
+                          const faltanCount = cruce?.faltan || 0;
                           const pendientesOpen = pacPendientesOpenId === p.id;
                           return (
                             <div key={p.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
@@ -4202,17 +4203,21 @@ ${text}`;
                                     <span className="mx-1">·</span>
                                     Máx. intentos: <span className="font-semibold">{p.maxIntentos}</span>
                                     <span className="mx-1">·</span>
-                                    <span className="font-semibold text-emerald-600">{aprobadosCount}</span>/{roster.length} aprobados
+                                    {pacLoading
+                                      ? <ExtractingInline label="Actualizando resultados" />
+                                      : <><span className="font-semibold text-emerald-600">{aprobadosCount}</span>/{roster.length} aprobados</>}
                                   </p>
                                   <button onClick={() => setPacPendientesOpenId(pendientesOpen ? null : p.id)}
                                     title="Cruce por DNI con el personal ACTIVO de la hoja PERSONAL TEMPORAL"
                                     className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${pendientesOpen ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
-                                    {personalLoading && personalActivo.length === 0
-                                      ? <Loader2 className="w-3 h-3 animate-spin" />
-                                      : <Users className="w-3 h-3" />}
-                                    {personalActivo.length > 0
-                                      ? <>Faltan rendir: {faltanCount} de {padron.length} activos</>
-                                      : 'Ver quién falta rendir'}
+                                    {personalLoading || pacLoading
+                                      ? <ExtractingInline label="Extrayendo información" />
+                                      : <>
+                                        <Users className="w-3 h-3" />
+                                        {personalActivo.length > 0
+                                          ? <>Faltan rendir: {faltanCount} de {padron.length} activos</>
+                                          : 'Ver quién falta rendir'}
+                                      </>}
                                     {pendientesOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                                   </button>
                                   <div className="mt-2 flex items-center gap-2 bg-[#f8f9fa] rounded-lg px-3 py-2 border border-[#e1e3e4]">
@@ -4250,7 +4255,7 @@ ${text}`;
                               </div>
                               {pendientesOpen && (
                                 <div className="border-t border-[#e1e3e4] bg-[#fbfbfc] px-4 py-3.5">
-                                  <PacPendientesPanel programa={p} rows={padron} link={link} loading={personalLoading} />
+                                  <PacPendientesPanel programa={p} rows={padron} link={link} loading={personalLoading || pacLoading} />
                                 </div>
                               )}
                             </div>
@@ -4424,7 +4429,7 @@ ${text}`;
                 {pacSubTab === 'seguimiento' && (() => {
                   const programa = pacProgramas.find(p => p.id === selectedProgramaId) || pacProgramas[0] || null;
                   if (!programa) return <p className="text-sm text-[#737781] py-8 text-center">No hay capacitaciones programadas todavía.</p>;
-                  const roster = buildPacRoster(programa, pacResultados, ingresoRecords);
+                  const roster = pacCruces.get(programa.id)?.roster || [];
                   const counts = {
                     aprobado: roster.filter(r => r.status === 'aprobado').length,
                     en_progreso: roster.filter(r => r.status === 'en_progreso').length,
@@ -4512,7 +4517,7 @@ ${text}`;
                   const porPrograma = pacProgramas.map(p => {
                     const resultadosP = pacResultados.filter(r => r.programaId === p.id);
                     const aprobadosP = resultadosP.filter(r => r.aprobado).length;
-                    const roster = buildPacRoster(p, pacResultados, ingresoRecords);
+                    const roster = pacCruces.get(p.id)?.roster || [];
                     const pct = roster.length > 0 ? Math.round((aprobadosP / roster.length) * 100) : 0;
                     return { label: p.nombre.slice(0, 14), value: pct, color: '#1b4d89' };
                   });
@@ -4672,7 +4677,7 @@ ${text}`;
                               </div>
                               <input value={p.pregunta} onChange={e => handleUpdatePreguntaField(p.idPregunta, 'pregunta', e.target.value)}
                                 placeholder="Enunciado de la pregunta"
-                                className="w-full px-3 py-2 text-sm border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                                className="w-full px-3 py-2 text-sm text-[#111827] font-medium placeholder:text-[#9ca3af] placeholder:font-normal border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {(['A', 'B', 'C', 'D'] as const).map(opt => (
                                   <div key={opt} className="flex items-center gap-2">
@@ -4683,13 +4688,13 @@ ${text}`;
                                     </button>
                                     <input value={p[`option${opt}` as 'optionA']} onChange={e => handleUpdatePreguntaField(p.idPregunta, `option${opt}` as 'optionA', e.target.value)}
                                       placeholder={`Opción ${opt}`}
-                                      className="flex-1 px-2.5 py-1.5 text-xs border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                                      className="flex-1 px-2.5 py-1.5 text-xs text-[#111827] font-medium placeholder:text-[#9ca3af] placeholder:font-normal border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
                                   </div>
                                 ))}
                               </div>
                               <input value={p.explanation || ''} onChange={e => handleUpdatePreguntaField(p.idPregunta, 'explanation', e.target.value)}
                                 placeholder="Explicación (opcional, se muestra tras responder)"
-                                className="w-full px-3 py-1.5 text-xs border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                                className="w-full px-3 py-1.5 text-xs text-[#111827] placeholder:text-[#9ca3af] border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
                             </div>
                           ))}
                         </div>

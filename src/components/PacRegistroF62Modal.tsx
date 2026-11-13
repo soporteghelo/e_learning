@@ -7,6 +7,12 @@ import { fetchPersonalActivo } from '../services/sheetsService';
 import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 import { normalizeDni, pickIntentosParaRegistro } from '../lib/pacPadron';
 import { trimSignature } from '../lib/signatureTrim';
+import { mapWithConcurrency } from '../lib/concurrency';
+import ExtractingLoader from './ExtractingLoader';
+
+// Firmas descargadas a la vez: con mucha asistencia, bajarlas todas juntas saturaba
+// el proxy de imágenes y el navegador
+const FIRMAS_EN_PARALELO = 6;
 import PacRegistroF62Template from './PacRegistroF62Template';
 import { defaultF62Editable, type F62Editable, type F62Tipo, type PacF62Row } from '../lib/f62';
 
@@ -39,6 +45,7 @@ export default function PacRegistroF62Modal({ programa, resultados, appConfig, o
 }) {
   const [datos, setDatos] = useState<F62Editable>(() => loadDatos(programa, appConfig));
   const [rows, setRows] = useState<PacF62Row[] | null>(null);
+  const [progreso, setProgreso] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState<'pdf' | 'print' | null>(null);
   const templateRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +60,8 @@ export default function PacRegistroF62Modal({ programa, resultados, appConfig, o
       const intentos = pickIntentosParaRegistro(programa.id, resultados);
       const padron = await fetchPersonalActivo().catch(() => []);
       const cargoPorDni = new Map(padron.map(p => [normalizeDni(p.dni), p.cargo]));
-      const filas = await Promise.all(intentos.map(async (r): Promise<PacF62Row> => {
+      if (!cancelado) setProgreso({ done: 0, total: intentos.length });
+      const filas = await mapWithConcurrency(intentos, FIRMAS_EN_PARALELO, async (r): Promise<PacF62Row> => {
         const firma = await fetchDriveImageAsBase64(r.firmaUrl);
         return {
           dni: normalizeDni(r.dni),
@@ -63,7 +71,10 @@ export default function PacRegistroF62Modal({ programa, resultados, appConfig, o
           observacion: `Nota ${r.nota.toFixed(1)} - ${r.aprobado ? 'Aprobado' : 'Desaprobado'}`,
           firmaBase64: firma ? await trimSignature(firma) : undefined,
         };
-      }));
+      }, {
+        onProgress: (done, total) => { if (!cancelado) setProgreso({ done, total }); },
+        isCancelled: () => cancelado,
+      });
       if (!cancelado) setRows(filas);
     })().catch(() => { if (!cancelado) { setRows([]); onError('No se pudo cargar la asistencia'); } });
     return () => { cancelado = true; };
@@ -198,8 +209,12 @@ export default function PacRegistroF62Modal({ programa, resultados, appConfig, o
           {/* Vista previa */}
           <div className="flex-1 min-h-0 overflow-auto bg-[#e9ebee] p-4">
             {rows === null ? (
-              <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-[#737781]">
-                <Loader2 className="w-6 h-6 animate-spin text-[#1b4d89]" /> Cargando asistencia y firmas…
+              <div className="flex items-center justify-center h-full">
+                <div className="w-full max-w-xl bg-white rounded-2xl border border-[#e1e3e4] px-4">
+                  {progreso && progreso.total > 0
+                    ? <ExtractingLoader label="Extrayendo firmas de los participantes" detail="Firmas descargadas" progress={progreso} rows={4} />
+                    : <ExtractingLoader label="Extrayendo asistencia" detail="Participantes y ocupación desde el padrón" rows={4} />}
+                </div>
               </div>
             ) : (
               <div className="w-fit mx-auto shadow-lg">

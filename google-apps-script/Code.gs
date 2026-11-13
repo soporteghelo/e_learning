@@ -800,12 +800,20 @@ function registerIngreso(sheet, ingreso) {
   var rowIndex = findIngresoRow_(sheet, colMap, ingreso.DNI || ingreso.Id);
   var existingRow = rowIndex !== -1 ? sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0] : null;
 
+  // Si la fila ya existe, un valor entrante vacío NO pisa lo guardado: al volver a
+  // autorizar la firma desde otro dispositivo (saveOnboardingConsent manda Publico: ''
+  // y los datos de perfil que tenga la sesión) se borraban el perfil elegido y otros
+  // datos del trabajador. Id e Inicio tampoco se regeneran en cada registro.
   var rowData = [];
   headers.forEach(function(h, i) {
-    if (existingRow && (h === 'ProgressJSON' || h === 'Avance' || h === 'Nota' || h === 'ModulosCompletados' || h === 'IntentosQuiz' || h === 'TiempoTotal')) {
-      rowData.push(existingRow[i] || (ingreso[h] !== undefined ? ingreso[h] : ''));
+    var entrante = ingreso[h];
+    var vacio = entrante === undefined || entrante === null || String(entrante).trim() === '';
+    if (existingRow && (h === 'ProgressJSON' || h === 'Avance' || h === 'Nota' || h === 'ModulosCompletados' || h === 'IntentosQuiz' || h === 'TiempoTotal' || h === 'Id' || h === 'Inicio')) {
+      rowData.push(existingRow[i] !== '' && existingRow[i] !== null ? existingRow[i] : (entrante !== undefined ? entrante : ''));
+    } else if (existingRow && vacio) {
+      rowData.push(existingRow[i]);
     } else {
-      rowData.push(ingreso[h] !== undefined ? ingreso[h] : (existingRow ? existingRow[i] || '' : ''));
+      rowData.push(entrante !== undefined ? entrante : '');
     }
   });
 

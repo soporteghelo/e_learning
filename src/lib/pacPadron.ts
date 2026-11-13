@@ -24,6 +24,15 @@ export function normalizeDni(dni: string): string {
   return digits.length < 8 ? digits.padStart(8, '0') : digits;
 }
 
+// DNI normalizado de cada persona del padrón: el mismo padrón se cruza contra
+// todas las capacitaciones, así que se normaliza una vez y no una por capacitación.
+const dniNormalizado = new WeakMap<PersonalActivo, string>();
+const dniDe = (p: PersonalActivo) => {
+  let k = dniNormalizado.get(p);
+  if (k === undefined) { k = normalizeDni(p.dni); dniNormalizado.set(p, k); }
+  return k;
+};
+
 export function buildPacPadronRoster(
   programa: PacPrograma,
   resultados: PacResultado[],
@@ -41,7 +50,7 @@ export function buildPacPadronRoster(
   const seen = new Set<string>();
   const rows: PacPadronRow[] = [];
   for (const p of personal) {
-    const key = normalizeDni(p.dni);
+    const key = dniDe(p);
     if (seen.has(key)) continue; // el padrón a veces repite a la misma persona
     seen.add(key);
     const intentos = intentosByDni.get(key) || [];

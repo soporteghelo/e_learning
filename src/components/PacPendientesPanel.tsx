@@ -1,10 +1,15 @@
 import { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Loader2, MessageCircle, Search, UserX } from 'lucide-react';
+import { FileSpreadsheet, MessageCircle, Search, UserX } from 'lucide-react';
 import type { PacPrograma } from '../types';
 import type { PacRosterStatus } from '../lib/pacRoster';
 import type { PacPadronRow } from '../lib/pacPadron';
 import { buildWhatsAppLink } from '../lib/whatsapp';
+import ExtractingLoader from './ExtractingLoader';
+import Pager from './Pager';
+
+// Filas por página: con miles de personas, dibujar la tabla entera trababa el navegador
+const PAGE_SIZE = 50;
 
 type Filtro = PacRosterStatus | 'todos';
 
@@ -32,6 +37,7 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
   const [busqueda, setBusqueda] = useState('');
   const [guardia, setGuardia] = useState('');
   const [area, setArea] = useState('');
+  const [page, setPage] = useState(1);
 
   const counts = useMemo(() => {
     const c: Record<PacRosterStatus, number> = { sin_intentos: 0, en_progreso: 0, agotado: 0, aprobado: 0 };
@@ -66,19 +72,19 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
   };
 
   if (loading && rows.length === 0) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-6 text-xs text-[#737781]">
-        <Loader2 className="w-4 h-4 animate-spin text-[#1b4d89]" /> Cargando padrón de personal activo…
-      </div>
-    );
+    return <ExtractingLoader label="Extrayendo información" detail="Cruzando el padrón de personal activo con los resultados" rows={4} />;
   }
   if (rows.length === 0) {
     return (
       <p className="py-6 text-center text-xs text-[#737781] italic">
-        No se pudo leer el padrón de personal activo. Verifica que la hoja "PERSONAL TEMPORAL" esté compartida con el enlace.
+        No se pudo leer el padrón de personal activo. Revisa el Diagnóstico (🩺): el Apps Script debe tener acceso a la hoja "PERSONAL TEMPORAL".
       </p>
     );
   }
+
+  const totalPages = Math.max(1, Math.ceil(visibles.length / PAGE_SIZE));
+  const pageActual = Math.min(page, totalPages);
+  const filasPagina = visibles.slice((pageActual - 1) * PAGE_SIZE, pageActual * PAGE_SIZE);
 
   const chips: { key: Filtro; label: string; value: number; tone: string }[] = [
     { key: 'sin_intentos', label: 'Faltan rendir', value: counts.sin_intentos, tone: 'text-slate-700' },
@@ -92,7 +98,7 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {chips.map(c => (
-          <button key={c.key} onClick={() => setFiltro(c.key)}
+          <button key={c.key} onClick={() => { setFiltro(c.key); setPage(1); }}
             className={`rounded-xl px-3 py-2 border text-left transition-all ${filtro === c.key ? 'border-[#1b4d89] bg-[#1b4d89]/5 ring-1 ring-[#1b4d89]' : 'border-[#e1e3e4] bg-white hover:border-[#1b4d89]/40'}`}>
             <p className={`text-lg font-black leading-none ${c.tone}`}>{c.value}</p>
             <p className="text-[9px] text-[#737781] uppercase font-bold tracking-wider mt-1">{c.label}</p>
@@ -103,15 +109,15 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 flex-1 min-w-[160px] px-2.5 py-1.5 bg-white border border-[#e1e3e4] rounded-lg focus-within:border-[#1b4d89]">
           <Search className="w-3.5 h-3.5 text-[#737781]" />
-          <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar DNI o nombre…"
+          <input value={busqueda} onChange={e => { setBusqueda(e.target.value); setPage(1); }} placeholder="Buscar DNI o nombre…"
             className="flex-1 text-xs text-[#424750] bg-transparent focus:outline-none placeholder:text-[#b0b3b8]" />
         </div>
-        <select value={guardia} onChange={e => setGuardia(e.target.value)}
+        <select value={guardia} onChange={e => { setGuardia(e.target.value); setPage(1); }}
           className="px-2 py-1.5 bg-white border border-[#e1e3e4] rounded-lg text-xs text-[#424750] focus:outline-none focus:border-[#1b4d89]">
           <option value="">Todas las guardias</option>
           {guardias.map(g => <option key={g} value={g}>Guardia {g}</option>)}
         </select>
-        <select value={area} onChange={e => setArea(e.target.value)}
+        <select value={area} onChange={e => { setArea(e.target.value); setPage(1); }}
           className="px-2 py-1.5 bg-white border border-[#e1e3e4] rounded-lg text-xs text-[#424750] focus:outline-none focus:border-[#1b4d89] max-w-[180px]">
           <option value="">Todas las áreas</option>
           {areas.map(a => <option key={a} value={a}>{a}</option>)}
@@ -128,6 +134,7 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
           <p className="text-xs text-[#737781]">{filtro === 'sin_intentos' && !busqueda && !guardia && !area ? 'Todo el personal activo ya rindió esta evaluación' : 'Nadie coincide con los filtros'}</p>
         </div>
       ) : (
+        <div>
         <div className="max-h-[420px] overflow-auto rounded-xl border border-[#e1e3e4]">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-[#f8f9fa]">
@@ -143,7 +150,7 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f3f4f5] bg-white">
-              {visibles.map(r => {
+              {filasPagina.map(r => {
                 // El padrón trae "APELLIDO1 APELLIDO2 NOMBRE1 ...": el primer nombre es el 3er token
                 const partes = r.nombre.split(/\s+/);
                 const primerNombre = partes[2] || partes[partes.length - 1] || r.nombre;
@@ -178,6 +185,8 @@ export default function PacPendientesPanel({ programa, rows, link, loading }: {
               })}
             </tbody>
           </table>
+        </div>
+        <Pager page={pageActual} totalPages={totalPages} total={visibles.length} onPage={setPage} pageSize={PAGE_SIZE} />
         </div>
       )}
     </div>

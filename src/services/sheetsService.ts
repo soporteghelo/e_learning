@@ -929,7 +929,10 @@ function mapIngresoRow(row: any): IngresoRecord {
     contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
     fotografiaUrl: row.FOTOGRAFIA || '',
     selfieUrl: row.SELFIE || '',
-    consentimientoOk: row.CONSENTIMIENTO_OK || '',
+    // Sheets convierte el 'true' que escribe el Apps Script en una casilla booleana:
+    // por CSV llega como "TRUE" y por Apps Script como `true` (boolean). Se normaliza
+    // a 'true'/'' para que el login no vuelva a pedir la autorización ya dada.
+    consentimientoOk: String(row.CONSENTIMIENTO_OK ?? '').trim().toLowerCase() === 'true' ? 'true' : '',
   };
 }
 

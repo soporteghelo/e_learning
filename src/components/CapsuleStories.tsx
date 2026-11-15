@@ -611,41 +611,43 @@ export default function CapsuleStories({
                   <button
                     onClick={alternarPausa}
                     aria-label={pausado ? 'Reproducir' : 'Pausar'}
-                    className="w-11 h-11 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
+                    className="w-10 h-10 sm:w-11 sm:h-11 flex-shrink-0 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
                   >
                     {pausado ? <Play className="w-5 h-5 fill-current ml-0.5" /> : <Pause className="w-5 h-5 fill-current" />}
                   </button>
                   <button
                     onClick={retroceder10}
                     aria-label="Retroceder 10 segundos"
-                    className="w-11 h-11 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
+                    className="w-10 h-10 sm:w-11 sm:h-11 flex-shrink-0 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
                   >
                     <RotateCcw className="w-5 h-5" />
                   </button>
                   <button
                     onClick={() => setSilencio(s => !s)}
                     aria-label={silencio ? 'Activar sonido' : 'Silenciar'}
-                    className="w-11 h-11 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
+                    className="w-10 h-10 sm:w-11 sm:h-11 flex-shrink-0 rounded-full bg-white/15 border border-white/25 text-[#fff] flex items-center justify-center backdrop-blur-sm hover:bg-white/25 active:scale-90 transition-all"
                   >
                     {silencio ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                   </button>
                 </div>
 
-                {/* Anterior y siguiente se reparten el mismo ancho */}
-                <div className="flex items-center gap-2 flex-1 max-w-[260px]">
+                {/* Anterior y siguiente se reparten el mismo ancho.
+                    min-w-0 es lo que permite encoger: sin él flex-1 nunca baja
+                    del ancho del texto y el botón se salía de la pantalla. */}
+                <div className="flex items-center gap-1.5 flex-1 min-w-0 max-w-[260px]">
                   <button
                     onClick={retroceder}
                     disabled={idx === 0}
-                    className="flex-1 flex items-center justify-center gap-1 h-11 px-2 rounded-full bg-white/15 border border-white/25 text-[#fff] text-[11px] font-black uppercase tracking-wider hover:bg-white/25 active:scale-95 transition-all disabled:opacity-25 disabled:pointer-events-none"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-1 h-11 px-1.5 rounded-full bg-white/15 border border-white/25 text-[#fff] text-[11px] font-black uppercase hover:bg-white/25 active:scale-95 transition-all disabled:opacity-25 disabled:pointer-events-none"
                   >
                     <ChevronLeft className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">Anterior</span>
+                    <span className="truncate max-[359px]:hidden">Anterior</span>
                   </button>
                   <button
                     onClick={() => { marcarVista(idx); avanzar(); }}
-                    className="flex-1 flex items-center justify-center gap-1 h-11 px-2 rounded-full bg-blue-600 text-[#fff] text-[11px] font-black uppercase tracking-wider hover:bg-blue-500 active:scale-95 transition-all shadow-lg"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-1 h-11 px-1.5 rounded-full bg-blue-600 text-[#fff] text-[11px] font-black uppercase hover:bg-blue-500 active:scale-95 transition-all shadow-lg"
                   >
-                    <span className="truncate">{ultimaCapsula ? 'Terminar' : 'Siguiente'}</span>
+                    <span className="truncate max-[359px]:hidden">{ultimaCapsula ? 'Terminar' : 'Siguiente'}</span>
                     <ChevronRight className="w-4 h-4 flex-shrink-0" />
                   </button>
                 </div>

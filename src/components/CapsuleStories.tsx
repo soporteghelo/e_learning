@@ -72,7 +72,9 @@ export default function CapsuleStories({
   const [preview, setPreview] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const ytHostRef = useRef<HTMLDivElement>(null);
+  // Contenedor estable: YT.Player REEMPLAZA el nodo que recibe por su iframe,
+  // así que se le pasa un hijo desechable y nunca el div de React.
+  const ytContRef = useRef<HTMLDivElement>(null);
   const ytPlayerRef = useRef<any>(null);
   const rafRef = useRef<number>(0);
   const barraRef = useRef<HTMLDivElement>(null);
@@ -210,21 +212,29 @@ export default function CapsuleStories({
       setElegida(null);
       setReanudarEn(null);
       maxVistoRef.current = Math.max(maxVistoRef.current, destino);
-      // El seek necesita que el reproductor vuelva a estar montado.
-      setTimeout(() => { buscar(destino); reproducir(); }, 60);
+      // El reproductor nunca se destruyó: el salto es inmediato.
+      buscar(destino);
+      reproducir();
     } else {
       avanzar();
     }
   }, [reanudarEn, buscar, reproducir, avanzar]);
 
   // ── Reproductor de YouTube ───────────────────────────────────────────────
+  // Sin `fase` en las dependencias: la pregunta se dibuja encima y el
+  // reproductor sigue montado. Destruirlo al preguntar impedía recrearlo
+  // después, porque el contenedor aún no existía al volver.
   useEffect(() => {
-    if (!esYouTube || fase !== 'video') return;
+    if (!esYouTube) return;
     let cancelado = false;
 
     loadYouTubeApi().then(YT => {
-      if (cancelado || !ytHostRef.current) return;
-      ytPlayerRef.current = new YT.Player(ytHostRef.current, {
+      if (cancelado || !ytContRef.current) return;
+      const hueco = document.createElement('div');
+      hueco.style.width = '100%';
+      hueco.style.height = '100%';
+      ytContRef.current.appendChild(hueco);
+      ytPlayerRef.current = new YT.Player(hueco, {
         videoId: ytId,
         host: 'https://www.youtube-nocookie.com',
         playerVars: {
@@ -271,10 +281,12 @@ export default function CapsuleStories({
       cancelAnimationFrame(rafRef.current);
       try { ytPlayerRef.current?.destroy?.(); } catch { /* el iframe ya se fue */ }
       ytPlayerRef.current = null;
+      // El hijo desechable se va con el player; se limpia por si quedó algo.
+      if (ytContRef.current) ytContRef.current.innerHTML = '';
     };
     // `silencio` se aplica aparte para no recrear el player.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [esYouTube, ytId, fase]);
+  }, [esYouTube, ytId]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;
@@ -284,11 +296,11 @@ export default function CapsuleStories({
 
   // ── Reproductor de Drive ─────────────────────────────────────────────────
   useEffect(() => {
-    if (esYouTube || fase !== 'video' || driveFallo) return;
+    if (esYouTube || driveFallo) return;
     const v = videoRef.current;
     if (!v) return;
     v.play().then(() => setNecesitaToque(false)).catch(() => setNecesitaToque(true));
-  }, [esYouTube, idx, fase, driveFallo]);
+  }, [esYouTube, idx, driveFallo]);
 
   const alternarPausa = useCallback(() => {
     if (necesitaToque) { setNecesitaToque(false); reproducir(); return; }
@@ -401,22 +413,17 @@ export default function CapsuleStories({
       )}
       <div className="absolute inset-0 bg-black/40" />
 
-      <AnimatePresence mode="wait">
-        {fase === 'video' ? (
-          <motion.div
-            key="fase-video"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0"
-          >
+      {/* Capa de video: SIEMPRE montada. La pregunta se dibuja encima en vez
+          de reemplazarla, porque destruir el reproductor impedía volver a
+          crearlo (el contenedor aún no existía al regresar). */}
+      <div className="absolute inset-0" aria-hidden={fase === 'pregunta'}>
             {/* ── Reproductor ── */}
             <div className="absolute inset-0 flex items-center justify-center px-0">
               {esYouTube ? (
                 // Caja 16:9 centrada: en vertical el fondo difuminado se ve
                 // arriba y abajo en vez de dos franjas negras.
                 <div className="w-full max-h-full" style={{ aspectRatio: '16 / 9' }}>
-                  <div ref={ytHostRef} className="w-full h-full" />
+                  <div ref={ytContRef} className="w-full h-full" />
                 </div>
               ) : driveFallo ? (
                 embedFallback ? (
@@ -605,9 +612,11 @@ export default function CapsuleStories({
                 </p>
               )}
             </div>
-          </motion.div>
-        ) : (
-          /* ── Pregunta ── */
+      </div>
+
+      {/* ── Pregunta: overlay opaco sobre el video pausado ── */}
+      <AnimatePresence>
+        {fase === 'pregunta' && (
           <motion.div
             key="fase-pregunta"
             initial={{ opacity: 0, y: 24 }}
@@ -616,7 +625,7 @@ export default function CapsuleStories({
             transition={{ duration: 0.25 }}
             // bg-[#0f172a] literal: el modo claro reescribe `.bg-slate-950` y
             // dejaría la tarjeta clara con el texto blanco encima, ilegible.
-            className="absolute inset-0 overflow-y-auto bg-[#0f172a]"
+            className="absolute inset-0 z-40 overflow-y-auto bg-[#0f172a]"
           >
             <div className="min-h-full flex flex-col items-center justify-center p-5 py-10">
               <div className="w-full max-w-lg">

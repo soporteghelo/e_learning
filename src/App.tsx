@@ -47,6 +47,7 @@ import type { TourStage } from './components/GuidedTour';
 import CourseDetail from './components/CourseDetail';
 import DriveVideoPlayer from './components/DriveVideoPlayer';
 import { youtubeEmbedUrl, youtubeWatchUrl } from './lib/youtube';
+import { driveEmbedUrl, driveFileId as extraerDriveFileId } from './lib/drive';
 import InstallAppButton from './components/InstallAppButton';
 
 // Lazy loaded components for code splitting
@@ -67,39 +68,6 @@ const ViewLoader = () => (
   </div>
 );
 
-function driveEmbedUrl(url: string): string {
-  if (!url) return '';
-  const trimmedUrl = url.trim();
-  
-  // 1. Try to extract ID from standard Drive URL patterns
-  let fileId = '';
-  const patterns = [
-    /\/file\/d\/([a-zA-Z0-9_-]+)/, 
-    /id=([a-zA-Z0-9_-]+)/, 
-    /\/d\/([a-zA-Z0-9_-]+)/
-  ];
-  for (const p of patterns) { 
-    const m = trimmedUrl.match(p); 
-    if (m) { fileId = m[1]; break; } 
-  }
-  
-  // 2. If no pattern matched, check if it's a bare ID (typically 25+ chars)
-  if (!fileId && /^[a-zA-Z0-9_-]{25,}$/.test(trimmedUrl)) {
-    fileId = trimmedUrl;
-  }
-  
-  // 3. Construct preview URL if we have an ID
-  if (fileId) {
-    return `https://drive.google.com/file/d/${fileId}/preview`;
-  }
-  
-  // 4. Fallback: if it's already an absolute URL, return it; otherwise return empty to avoid relative path bugs
-  if (trimmedUrl.startsWith('http')) {
-    return trimmedUrl;
-  }
-  
-  return '';
-}
 
 /** Elimina quizSavedProgress y otros campos pesados antes de guardar en Sheets.
  *  `wrongAnswers` sí se conserva: es lo que el panel admin usa para mostrar en
@@ -1098,6 +1066,7 @@ export default function App() {
                   handleSaveProgress(selectedTopic.id, idx);
                 }}
                 onOpenMedia={(url, type) => setMediaOverlay({ url, type })}
+                questions={quizQuestions}
               />
             </Suspense>
           </motion.div>
@@ -1164,13 +1133,7 @@ export default function App() {
           const embedUrl = ytEmbedUrl ? '' : driveEmbedUrl(mediaOverlay.url);
           // Build a direct Drive view URL from the original link (always opens correctly)
           const rawUrl = mediaOverlay.url.trim();
-          let driveFileId = '';
-          if (!ytEmbedUrl) {
-            for (const p of [/\/file\/d\/([a-zA-Z0-9_-]+)/, /id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/]) {
-              const m = rawUrl.match(p); if (m) { driveFileId = m[1]; break; }
-            }
-            if (!driveFileId && /^[a-zA-Z0-9_-]{25,}$/.test(rawUrl)) driveFileId = rawUrl;
-          }
+          const driveFileId = ytEmbedUrl ? '' : extraerDriveFileId(rawUrl);
           const driveViewUrl = ytEmbedUrl
             ? youtubeWatchUrl(rawUrl)
             : driveFileId

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Play, Zap } from 'lucide-react';
 
 interface CapsuleCarouselProps {
   videos: string[];
   getThumb: (url: string) => string;
-  onOpen: (url: string) => void;
+  /** Índices ya vistos; los lleva LearningMode, que también recibe el visor. */
+  vistas: Set<number>;
+  /** Hay pregunta de cierre al terminar la última cápsula. */
+  tienePregunta?: boolean;
+  onOpen: (index: number) => void;
 }
 
 /**
@@ -13,12 +17,11 @@ interface CapsuleCarouselProps {
  * Los textos sobre la miniatura usan `text-[#fff]` y no `text-white`: el modo
  * claro reescribe `.text-white` a un color oscuro y los dejaba ilegibles.
  */
-export default function CapsuleCarousel({ videos, getThumb, onOpen }: CapsuleCarouselProps) {
+export default function CapsuleCarousel({ videos, getThumb, vistas, tienePregunta, onOpen }: CapsuleCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
-  const [vistas, setVistas] = useState<Set<number>>(new Set());
 
   const total = videos.length;
 
@@ -69,11 +72,6 @@ export default function CapsuleCarousel({ videos, getThumb, onOpen }: CapsuleCar
     el.scrollBy({ left: direccion * el.clientWidth * 0.85, behavior: 'smooth' });
   };
 
-  const abrir = (url: string, idx: number) => {
-    setVistas(prev => new Set(prev).add(idx));
-    onOpen(url);
-  };
-
   const desplazable = canPrev || canNext;
   // En móvil se ve una cápsula y asoma la siguiente; en pantallas anchas, 2 o 3 completas.
   const ancho = total === 2
@@ -83,15 +81,22 @@ export default function CapsuleCarousel({ videos, getThumb, onOpen }: CapsuleCar
   return (
     <div className="mb-4">
       {/* Cabecera: título, avance y flechas */}
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-          <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest truncate">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        {/* flex-wrap: en móvil las etiquetas bajan a una segunda línea en vez de
+            recortar el título a "3 CÁPSUL…". */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+          <span className="flex items-center gap-2 text-[10px] font-black text-blue-400 uppercase tracking-widest">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
             {total} Cápsulas de Video
           </span>
           {vistas.size > 0 && (
             <span className="text-[10px] font-bold text-emerald-500 whitespace-nowrap">
-              · {vistas.size} de {total} vistas
+              {vistas.size} de {total} vistas
+            </span>
+          )}
+          {tienePregunta && (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-500 whitespace-nowrap">
+              <Zap className="w-3 h-3" /> Pregunta por cápsula
             </span>
           )}
         </div>
@@ -133,7 +138,7 @@ export default function CapsuleCarousel({ videos, getThumb, onOpen }: CapsuleCar
             <button
               key={`vid-${idx}`}
               type="button"
-              onClick={() => abrir(videoUrl, idx)}
+              onClick={() => onOpen(idx)}
               aria-label={`Reproducir cápsula ${idx + 1} de ${total}`}
               className={`group relative flex-shrink-0 snap-start overflow-hidden rounded-2xl bg-slate-900 border transition-all shadow-lg active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${ancho} ${
                 vista ? 'border-emerald-500/60' : 'border-white/10 hover:border-blue-500/60'

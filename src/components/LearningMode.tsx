@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import CapsuleCarousel from './CapsuleCarousel';
+import CapsuleStories from './CapsuleStories';
 import {
   ChevronLeft, ChevronRight, CheckCircle2,
   Play, FileText, ChevronDown, BookOpen, ListChecks, Award
 } from 'lucide-react';
-import type { LearnTopic, DataChunk } from '../types';
+import type { LearnTopic, DataChunk, QuizQuestion } from '../types';
 import { youtubeThumbUrl } from '../lib/youtube';
 
 interface LearningModeProps {
@@ -17,6 +18,15 @@ interface LearningModeProps {
   onSaveProgress: (chunkIndex: number) => void;
   onOpenMedia: (url: string, type: 'video' | 'pdf') => void;
   initialChunkIndex?: number;
+  /** Banco de preguntas del curso; se usa la de la categoría de cada lección. */
+  questions?: QuizQuestion[];
+}
+
+/** Normaliza para comparar categoría de pregunta con tema de lección. */
+function clave(texto?: string | null): string {
+  return String(texto || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function getDriveThumbUrl(url: string): string {
@@ -42,10 +52,14 @@ export default function LearningMode({
   onSaveProgress,
   onOpenMedia,
   initialChunkIndex = 0,
+  questions = [],
 }: LearningModeProps) {
   const [currentIndex, setCurrentIndex] = useState(initialChunkIndex);
   const [viewMode, setViewMode] = useState<'video' | 'read'>('video');
   const [showRecap, setShowRecap] = useState(false);
+  // Índice de la cápsula abierta en el visor Stories; null = visor cerrado.
+  const [storiesAt, setStoriesAt] = useState<number | null>(null);
+  const [vistas, setVistas] = useState<Set<number>>(new Set());
   const currentChunk = chunks[currentIndex];
   const progressPercent = chunks.length > 0
     ? Math.round(((currentIndex + 1) / chunks.length) * 100)
@@ -55,7 +69,11 @@ export default function LearningMode({
   useEffect(() => { onSaveProgressRef.current = onSaveProgress; });
 
   // Reset view mode to 'video' on chunk change
-  useEffect(() => { setViewMode('video'); }, [currentIndex]);
+  useEffect(() => {
+    setViewMode('video');
+    setStoriesAt(null);
+    setVistas(new Set());
+  }, [currentIndex]);
 
   // Save progress and scroll to top on chunk change (forward navigation)
   useEffect(() => {
@@ -71,6 +89,29 @@ export default function LearningMode({
   const prevSlide = useCallback(() => {
     if (currentIndex > 0) setCurrentIndex(i => i - 1);
   }, [currentIndex]);
+
+  // Banco de la lección: preguntas del curso cuya categoría es este tema.
+  // El visor gasta una por cápsula y saca otra distinta cuando se falla.
+  const preguntasLeccion = useMemo(() => {
+    if (!currentChunk) return [];
+    const k = clave(currentChunk.tema);
+    if (!k) return [];
+    const candidatas = questions.filter(
+      q => q.idMain === topic.id && clave(q.categoriaContenido) === k
+    );
+    // Orden estable por lección, pero distinto entre lecciones.
+    const semilla = currentChunk.cod || currentChunk.tema;
+    return [...candidatas].sort((a, b) =>
+      ((a.idQuiz + semilla).length + a.idQuiz.charCodeAt(0)) -
+      ((b.idQuiz + semilla).length + b.idQuiz.charCodeAt(0))
+    );
+  }, [questions, topic.id, currentChunk]);
+
+  const abrirStories = useCallback((desde: number) => setStoriesAt(desde), []);
+
+  const marcarCapsulaVista = useCallback((i: number) => {
+    setVistas(prev => (prev.has(i) ? prev : new Set(prev).add(i)));
+  }, []);
 
   if (chunks.length === 0) {
     return (
@@ -298,7 +339,7 @@ export default function LearningMode({
                               return (
                                 <motion.button
                                   key={`vid-${idx}`}
-                                  onClick={() => onOpenMedia(videoUrl, 'video')}
+                                  onClick={() => abrirStories(idx)}
                                   whileHover={{ scale: 1.02 }}
                                   whileTap={{ scale: 0.97 }}
                                   className="group relative w-full overflow-hidden rounded-2xl bg-slate-900 border border-white/10 hover:border-blue-500/60 transition-all shadow-lg"
@@ -320,7 +361,9 @@ export default function LearningMode({
                                       <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                                       <span className="text-[9px] font-black text-white/90 uppercase tracking-wider">Reproducir</span>
                                     </div>
-                                    <span className="text-[9px] text-white/40 font-medium">Modo Cine</span>
+                                    <span className="text-[9px] text-white/40 font-medium">
+                                      {preguntasLeccion.length > 0 ? 'Con pregunta' : 'Modo Cine'}
+                                    </span>
                                   </div>
                                 </motion.button>
                               );
@@ -331,7 +374,9 @@ export default function LearningMode({
                           <CapsuleCarousel
                             videos={currentChunk.videos}
                             getThumb={getDriveThumbUrl}
-                            onOpen={url => onOpenMedia(url, 'video')}
+                            vistas={vistas}
+                            tienePregunta={preguntasLeccion.length > 0}
+                            onOpen={abrirStories}
                           />
                         )
                       )}
@@ -431,6 +476,24 @@ export default function LearningMode({
           </button>
         </footer>
       </div>
+
+      {/* Visor de cápsulas en formato stories */}
+      <AnimatePresence>
+        {storiesAt !== null && (
+          <CapsuleStories
+            key={`stories-${currentIndex}`}
+            videos={currentChunk.videos}
+            startIndex={storiesAt}
+            tema={currentChunk.tema}
+            preguntas={preguntasLeccion}
+            onCapsuleDone={marcarCapsulaVista}
+            onClose={() => setStoriesAt(null)}
+            onNextLesson={currentIndex < chunks.length - 1
+              ? () => { setStoriesAt(null); nextSlide(); }
+              : undefined}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

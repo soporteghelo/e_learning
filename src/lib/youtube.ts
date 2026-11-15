@@ -38,3 +38,38 @@ export function youtubeWatchUrl(rawUrl?: string | null): string {
   const id = youtubeVideoId(rawUrl);
   return id ? `https://www.youtube.com/watch?v=${id}` : '';
 }
+
+/**
+ * Carga la IFrame Player API de YouTube una sola vez y resuelve con `window.YT`.
+ * El visor de cápsulas la necesita para leer el avance y saber cuándo termina
+ * un video: el iframe /embed por sí solo no avisa de nada.
+ */
+let apiPromesa: Promise<any> | null = null;
+
+export function loadYouTubeApi(): Promise<any> {
+  if (typeof window === 'undefined') return Promise.reject(new Error('sin window'));
+  const w = window as any;
+  if (w.YT && w.YT.Player) return Promise.resolve(w.YT);
+  if (apiPromesa) return apiPromesa;
+
+  apiPromesa = new Promise((resolve, reject) => {
+    const anterior = w.onYouTubeIframeAPIReady;
+    w.onYouTubeIframeAPIReady = () => {
+      if (typeof anterior === 'function') anterior();
+      resolve(w.YT);
+    };
+    const existente = document.querySelector('script[src*="youtube.com/iframe_api"]');
+    if (!existente) {
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      s.async = true;
+      s.onerror = () => { apiPromesa = null; reject(new Error('no se pudo cargar la API de YouTube')); };
+      document.head.appendChild(s);
+    }
+    setTimeout(() => {
+      if (w.YT && w.YT.Player) resolve(w.YT);
+      else { apiPromesa = null; reject(new Error('tiempo de espera agotado')); }
+    }, 10000);
+  });
+  return apiPromesa;
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Play, Pause, RotateCcw, Volume2, VolumeX,
-  ChevronRight, Zap, Check, AlertCircle, BookOpen, FastForward, ChevronDown,
+  ChevronLeft, ChevronRight, Zap, Check, AlertCircle, BookOpen, FastForward, ChevronDown,
 } from 'lucide-react';
 import type { QuizQuestion } from '../types';
 import { youtubeVideoId, youtubeThumbUrl, loadYouTubeApi } from '../lib/youtube';
@@ -70,6 +70,12 @@ export default function CapsuleStories({
   // Arrastre de la barra de avance
   const [arrastrando, setArrastrando] = useState(false);
   const [preview, setPreview] = useState(0);
+
+  // En horizontal el video llena la pantalla, así que los controles se
+  // esconden solos tras unos segundos y vuelven al tocar.
+  const [controles, setControles] = useState(true);
+  const [esHorizontal, setEsHorizontal] = useState(false);
+  const ocultarRef = useRef<number>(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // Contenedor estable: YT.Player REEMPLAZA el nodo que recibe por su iframe,
@@ -312,6 +318,33 @@ export default function CapsuleStories({
     buscar(Math.max(0, tiempo - 10));
   }, [buscar, tiempo]);
 
+  // ── Ocultar controles en horizontal ──────────────────────────────────────
+  const SEGUNDOS_OCULTAR = 5000;
+
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: landscape)');
+    const aplicar = () => setEsHorizontal(mq.matches);
+    aplicar();
+    mq.addEventListener('change', aplicar);
+    return () => mq.removeEventListener('change', aplicar);
+  }, []);
+
+  /** Muestra los controles y reinicia la cuenta para esconderlos. */
+  const despertarControles = useCallback(() => {
+    setControles(true);
+    window.clearTimeout(ocultarRef.current);
+    // Solo se esconden mientras el video corre: en pausa estorban menos que
+    // perder el control de reproducción.
+    if (esHorizontal && fase === 'video' && !pausado && !necesitaToque && !arrastrando) {
+      ocultarRef.current = window.setTimeout(() => setControles(false), SEGUNDOS_OCULTAR);
+    }
+  }, [esHorizontal, fase, pausado, necesitaToque, arrastrando]);
+
+  useEffect(() => {
+    despertarControles();
+    return () => window.clearTimeout(ocultarRef.current);
+  }, [despertarControles, idx]);
+
   // ── Barra de avance (adelantar) ──────────────────────────────────────────
   const fraccionEn = (clientX: number) => {
     const r = barraRef.current?.getBoundingClientRect();
@@ -371,12 +404,15 @@ export default function CapsuleStories({
     // Deslizar hacia abajo: siguiente cápsula. Hacia arriba: anterior.
     if (dy > UMBRAL_DESLIZ) { marcarVista(idx); avanzar(); return; }
     if (dy < -UMBRAL_DESLIZ) { retroceder(); return; }
+    // Con los controles escondidos, el primer toque solo los devuelve.
+    if (!controles) { despertarControles(); return; }
     // Toque: izquierda atrás, derecha adelante 10 s, centro pausa.
     const r = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width;
     if (x < 0.28) buscar(Math.max(0, tiempo - 10));
     else if (x > 0.72) aplicarBusqueda(tiempo + 10);
     else alternarPausa();
+    despertarControles();
   };
 
   const correcta = preguntaActual?.correctAnswer;
@@ -403,6 +439,8 @@ export default function CapsuleStories({
       transition={{ duration: 0.25 }}
       className="media-overlay fixed inset-0 bg-black select-none"
       style={{ zIndex: 99999 }}
+      // Mover el ratón (escritorio) también devuelve los controles.
+      onPointerMove={() => { if (!controles) despertarControles(); }}
     >
       {fondo && fase === 'video' && (
         <div
@@ -467,9 +505,11 @@ export default function CapsuleStories({
             </div>
 
             {/* ── Zona de gestos ── */}
+            {/* Con los controles ocultos la zona cubre todo, para que
+                cualquier toque los devuelva. */}
             <div
               className="absolute inset-x-0 cursor-pointer touch-none"
-              style={{ top: 104, bottom: 128 }}
+              style={controles ? { top: 104, bottom: 128 } : { top: 0, bottom: 0 }}
               onPointerDown={onPointerDownZona}
               onPointerUp={onPointerUpZona}
               aria-hidden
@@ -488,7 +528,7 @@ export default function CapsuleStories({
             )}
 
             {/* ── Barras de cápsulas + cabecera ── */}
-            <div className="absolute top-0 inset-x-0 z-30 px-3 pt-3 pb-8 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+            <div className={`absolute top-0 inset-x-0 z-30 px-3 pt-3 pb-8 bg-gradient-to-b from-black/80 to-transparent pointer-events-none transition-opacity duration-300 ${controles ? 'opacity-100' : 'opacity-0'}`}>
               <div className="flex items-center gap-1">
                 {videos.map((_, i) => {
                   const llenado = i < idx || completas.has(i) ? 1 : i === idx ? (sinTelemetria ? 0 : fraccion) : 0;
@@ -524,7 +564,7 @@ export default function CapsuleStories({
             </div>
 
             {/* ── Barra de avance + controles ── */}
-            <div className="absolute bottom-0 inset-x-0 z-30 px-4 pb-5 pt-10 bg-gradient-to-t from-black/85 via-black/50 to-transparent">
+            <div className={`absolute bottom-0 inset-x-0 z-30 px-4 pb-5 pt-10 bg-gradient-to-t from-black/85 via-black/50 to-transparent transition-opacity duration-300 ${controles ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               {!sinTelemetria && (
                 <div className="mb-3">
                   <div
@@ -591,13 +631,24 @@ export default function CapsuleStories({
                   </button>
                 </div>
 
-                <button
-                  onClick={() => { marcarVista(idx); avanzar(); }}
-                  className="flex items-center gap-1.5 pl-5 pr-4 h-11 rounded-full bg-blue-600 text-[#fff] text-xs font-black uppercase tracking-wider hover:bg-blue-500 active:scale-95 transition-all shadow-lg"
-                >
-                  {ultimaCapsula ? 'Terminar' : 'Siguiente'}
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                {/* Anterior y siguiente se reparten el mismo ancho */}
+                <div className="flex items-center gap-2 flex-1 max-w-[260px]">
+                  <button
+                    onClick={retroceder}
+                    disabled={idx === 0}
+                    className="flex-1 flex items-center justify-center gap-1 h-11 px-2 rounded-full bg-white/15 border border-white/25 text-[#fff] text-[11px] font-black uppercase tracking-wider hover:bg-white/25 active:scale-95 transition-all disabled:opacity-25 disabled:pointer-events-none"
+                  >
+                    <ChevronLeft className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate">Anterior</span>
+                  </button>
+                  <button
+                    onClick={() => { marcarVista(idx); avanzar(); }}
+                    className="flex-1 flex items-center justify-center gap-1 h-11 px-2 rounded-full bg-blue-600 text-[#fff] text-[11px] font-black uppercase tracking-wider hover:bg-blue-500 active:scale-95 transition-all shadow-lg"
+                  >
+                    <span className="truncate">{ultimaCapsula ? 'Terminar' : 'Siguiente'}</span>
+                    <ChevronRight className="w-4 h-4 flex-shrink-0" />
+                  </button>
+                </div>
               </div>
 
               {/* Solo en móvil: en escritorio el gesto no aplica y el texto
